@@ -1,70 +1,88 @@
 import tensorflow as tf
-from tensorflow.python.keras.losses import binary_crossentropy
+from tensorflow.python.keras.losses import binary_crossentropy, sparse_categorical_crossentropy
 
 
-def yolo_head(feats, anchors, num_classes, input_shape, calc_loss=False):
-    """Convert final layer features to bounding box parameters."""
-    num_anchors = len(anchors)
-    # Reshape to batch, height, width, num_anchors, box_params.
-    anchors_tensor = tf.reshape(tf.constant(anchors, dtype=tf.float32), [1, 1, 1, num_anchors, 2])
+def broadcast_iou(pred_box, true_box):
+    # pred_box: (b, gx, gy, 3, 4)
+    # true_box: (n, 4)
 
-    grid_shape = tf.shape(feats)[1:3]  # height, width
-    grid_y = tf.tile(tf.reshape(tf.range(0, stop=grid_shape[0]), [-1, 1, 1, 1]), [1, grid_shape[1], 1, 1])
-    grid_x = tf.tile(tf.reshape(tf.range(0, stop=grid_shape[1]), [1, -1, 1, 1]), [grid_shape[0], 1, 1, 1])
-    grid = tf.concat([grid_x, grid_y], axis=-1)
-    grid = tf.cast(grid, feats.dtype)
+    # broadcast boxes
+    pred_box = tf.expand_dims(pred_box, -2)   # (b, gx, gy, 3, 1, 4)
+    true_box = tf.expand_dims(true_box, 0)    # (1, n, 4)
+    # new_shape: (b, gx, gy, 3, n, 4)
+    new_shape = tf.broadcast_dynamic_shape(tf.shape(pred_box), tf.shape(true_box))
+    pred_box = tf.broadcast_to(pred_box, new_shape)
+    true_box = tf.broadcast_to(true_box, new_shape)
 
-    feats = tf.reshape(feats, [-1, grid_shape[0], grid_shape[1], num_anchors, num_classes + 5])
+    # (b, gx, gy, 3, n)
+    int_w = tf.maximum(tf.minimum(pred_box[..., 2], true_box[..., 2]) -
+                       tf.maximum(pred_box[..., 0], true_box[..., 0]), 0)
+    int_h = tf.maximum(tf.minimum(pred_box[..., 3], true_box[..., 3]) -
+                       tf.maximum(pred_box[..., 1], true_box[..., 1]), 0)
+    int_area = int_w * int_h
 
-    # Adjust preditions to each spatial grid point and anchor size.
-    box_xy = (tf.sigmoid(feats[..., :2]) + grid) / tf.cast(grid_shape[::-1], feats.dtype)
-    box_wh = tf.exp(feats[..., 2:4]) * anchors_tensor / tf.cast(input_shape[::-1], feats.dtype)
-    box_confidence = tf.sigmoid(feats[..., 4:5])
-    box_class_probs = tf.sigmoid(feats[..., 5:])
-
-    if calc_loss is True:
-        return grid, feats, box_xy, box_wh
-    return box_xy, box_wh, box_confidence, box_class_probs
+    # w * h
+    box_1_area = (pred_box[..., 2] - pred_box[..., 0]) * \
+        (pred_box[..., 3] - pred_box[..., 1])
+    box_2_area = (true_box[..., 2] - true_box[..., 0]) * \
+        (true_box[..., 3] - true_box[..., 1])
+    return int_area / (box_1_area + box_2_area - int_area)
 
 
-def box_iou(b1, b2):
-    """Return iou tensor
+def YoloLoss(anchors, ignore_thresh=0.5):
+    def yolo_loss(y_true, y_pred):
+        # 1. transform all pred outputs
+        # y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))
+        pred_box, pred_obj, pred_class, pred_xywh = y_pred
+        pred_xy = pred_xywh[..., 0:2]
+        pred_wh = pred_xywh[..., 2:4]
 
-    Parameters
-    ----------
-    b1: tensor, shape=(i1,...,iN, 4), xywh
-    b2: tensor, shape=(j, 4), xywh
+        # 2. transform all true outputs
+        # y_true: (batch_size, grid, grid, anchors, (x1, y1, x2, y2, obj, cls))
+        # true_box: (batch_size, grid, grid, anchors, (x1, y1, x2, y2))     # 0~1
+        true_box, true_obj, true_class_idx = tf.split(
+            y_true, (4, 1, 1), axis=-1)
+        true_xy = (true_box[..., 0:2] + true_box[..., 2:4]) / 2
+        true_wh = true_box[..., 2:4] - true_box[..., 0:2]
 
-    Returns
-    -------
-    iou: tensor, shape=(i1,...,iN, j)
+        # give higher weights to small boxes
+        box_loss_scale = 2 - true_wh[..., 0] * true_wh[..., 1]
 
-    """
+        # 3. inverting the pred box equations
+        grid_h, grid_w = tf.shape(y_true)[1:3]
+        grid = tf.meshgrid(tf.range(grid_w), tf.range(grid_h))
+        grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
+        # ex: (0.5, 0.5) * (13, 13) - (6, 6)
+        true_xy = true_xy * (grid_h, grid_w) - tf.cast(grid, true_xy.dtype)
+        true_wh = tf.math.log(true_wh / anchors)
+        true_wh = tf.where(tf.math.is_inf(true_wh), tf.zeros_like(true_wh), true_wh)
 
-    # Expand dim to apply broadcasting.
-    b1 = tf.expand_dims(b1, -2)
-    b1_xy = b1[..., :2]
-    b1_wh = b1[..., 2:4]
-    b1_wh_half = b1_wh / 2.
-    b1_mins = b1_xy - b1_wh_half
-    b1_maxes = b1_xy + b1_wh_half
+        # 4. calculate all masks
+        obj_mask = tf.squeeze(true_obj, -1)     # (batch_size, grid, grid, anchors)
+        # ignore false positive when iou is over threshold
+        # true_box_flat (N, (x1, y1, x2, y2))
+        true_box_flat = tf.boolean_mask(true_box, tf.cast(obj_mask, tf.bool))
+        best_iou = tf.reduce_max(broadcast_iou(pred_box, true_box_flat), axis=-1)
+        ignore_mask = tf.cast(best_iou < ignore_thresh, tf.float32)
 
-    # Expand dim to apply broadcasting.
-    b2 = tf.expand_dims(b2, 0)
-    b2_xy = b2[..., :2]
-    b2_wh = b2[..., 2:4]
-    b2_wh_half = b2_wh / 2.
-    b2_mins = b2_xy - b2_wh_half
-    b2_maxes = b2_xy + b2_wh_half
+        # 5. calculate all losses
+        xy_loss = obj_mask * box_loss_scale * \
+                  tf.reduce_sum(tf.square(true_xy - pred_xy), axis=-1)
+        wh_loss = obj_mask * box_loss_scale * \
+                  tf.reduce_sum(tf.square(true_wh - pred_wh), axis=-1)
+        confidence_loss = obj_mask * binary_crossentropy(true_obj, pred_obj) + \
+                          (1 - obj_mask) * ignore_mask * binary_crossentropy(true_obj, pred_obj)
+        class_loss = obj_mask * sparse_categorical_crossentropy(
+            true_class_idx, pred_class)
 
-    intersect_mins = tf.maximum(b1_mins, b2_mins)
-    intersect_maxes = tf.minimum(b1_maxes, b2_maxes)
-    intersect_wh = tf.maximum(intersect_maxes - intersect_mins, 0.)
-    intersect_area = intersect_wh[..., 0] * intersect_wh[..., 1]
-    b1_area = b1_wh[..., 0] * b1_wh[..., 1]
-    b2_area = b2_wh[..., 0] * b2_wh[..., 1]
-    iou = intersect_area / (b1_area + b2_area - intersect_area)
-    return iou
+        # 6. sum over (batch, gridx, gridy, anchors) => (batch, 1)
+        xy_loss = tf.reduce_sum(xy_loss, axis=(1, 2, 3))
+        wh_loss = tf.reduce_sum(wh_loss, axis=(1, 2, 3))
+        confidence_loss = tf.reduce_sum(confidence_loss, axis=(1, 2, 3))
+        class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))
+
+        return xy_loss + wh_loss + confidence_loss + class_loss
+    return yolo_loss
 
 
 def yolo_loss(args, anchors, num_classes, ignore_thresh=.5, print_loss=False):
