@@ -1,10 +1,6 @@
 import tensorflow as tf
 import tensorflow_datasets as tfds
-
-train_data, info = tfds.load("coco2014", split=tfds.Split.TRAIN, with_info=True)
-valid_data = tfds.load("coco2014", split=tfds.Split.VALIDATION)
-test_data = tfds.load("coco2014", split=tfds.Split.TEST)
-labels = info.features['labels'].names
+import numpy as np
 
 
 # FeaturesDict({
@@ -30,26 +26,24 @@ labels = info.features['labels'].names
 #         'pose': ClassLabel(shape=(), dtype=tf.int64, num_classes=5),
 #     }),
 # })
-
-
-
 def parse_aug_fn(dataset):
     """
     Image Augmentation function
     """
     # (None, None, 3)
     x = tf.cast(dataset['image'], tf.float32) / 255.
-    # (x1, y1, x2, y2, class)
+    # (y1, x1, y2, x2, class)
     y = dataset['objects']['bbox']
-    x, y = flip(x, y)
+    x, y = resize(x, y)
 
     # 觸發顏色轉換機率50%
     x = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: color(x), lambda: x)
-    # 觸發影像旋轉機率0.25%
-    x = tf.cond(tf.random.uniform([], 0, 1) > 0.75, lambda: rotate(x), lambda: x)
+    # 觸發影像翻轉機率50%
+    x, y = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: flip(x, y), lambda: (x, y))
     # 觸發影像縮放機率50%
-    x = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x), lambda: x)
-    # 將輸出標籤轉乘One-hot編碼
+    x, y = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x, y), lambda: (x, y))
+    # 將[y1, x1, y2, x2]合為shape=(x, 4)的Tensor
+    y = tf.stack(y, axis=1)
     return x, y
 
 
@@ -87,64 +81,181 @@ def transform_targets(y_train, anchors, anchor_masks, classes):
     return tuple(y_outs)
 
 
-def flip(x, y):
+def resize(x, bboxes, input_size=(416, 416)):
     """
-    flip image(翻轉影像)
+        Resize Image(影像縮放)
+
+        :param x:  image inputs, 0~1
+        :param bboxes: bounding boxes inputs, shape(x, 4) "y1, x1, y2, x2", 0~1
+        :param input_size: 網路輸入大小
+        :return: 返回(images, bboxes), images: scale0~1, bboxes: return list [y1, x1, y2, x2], scale 0~w, h
+        """
+    # h, w, _ = x.shape
+    ih, iw = input_size
+    # scale = min(ih / h, iw / w)
+    # nh = int(h * scale)
+    # nw = int(w * scale)
+    # image resize
+    x = tf.image.resize(x, (ih, iw))
+    # x = tf.image.resize_image_with_crop_or_pad(x, ih, iw)  # 影像裁減和填補
+
+    # bounding box resize
+    bboxes = tf.multiply(bboxes, [ih, iw, ih, iw])
+    y1 = bboxes[..., 0]
+    x1 = bboxes[..., 1]
+    y2 = bboxes[..., 2]
+    x2 = bboxes[..., 3]
+    return x, [y1, x1, y2, x2]
+
+
+def flip(x, bboxes):
     """
-    x = tf.image.random_flip_left_right(x)  # 隨機左右翻轉影像
-    y[..., 2::-2] = 1 - y[..., 0::2]
-    return x, y
+        flip image(翻轉影像)
+
+        :param x:  image inputs, 0~1
+        :param bboxes: bounding boxes inputs list [y1, x1, y2, x2], 0~w or h
+        :return: 返回(images, bboxes), images: scale0~1, bboxes: return list [y1, x1, y2, x2], scale 0~w, h
+        """
+    h, w, c = x.shape
+    x = tf.image.flip_left_right(x)  # 隨機左右翻轉影像
+    y1 = bboxes[0]
+    x1 = w - bboxes[3]
+    y2 = bboxes[2]
+    x2 = w - bboxes[1]
+    return x, [y1, x1, y2, x2]
+
+
+def zoom(x, bboxes, scale_min=0.6, scale_max=1.4):
+    """
+        Zoom Image(影像縮放)
+
+        :param x:  image inputs, 0~1
+        :param bboxes: bounding boxes inputs list [y1, x1, y2, x2], 0~w or h
+        :param scale_min: 縮放最小倍數
+        :param scale_max: 縮放最大倍數
+        :return: 返回(images, bboxes), images: scale0~1, bboxes: return list [y1, x1, y2, x2], scale 0~w, h
+        """
+    h, w, _ = x.shape
+    scale = tf.random.uniform([], scale_min, scale_max)  # 隨機縮放比例
+    # 等比例縮放
+    nh = tf.cast(h * scale, tf.int32)  # 縮放後影像長度
+    nw = tf.cast(w * scale, tf.int32)  # 縮放後影像寬度
+
+    # 如果將影像縮小執行以下程式
+    def scale_less_then_one():
+        rsize_x = tf.image.resize(x, (nh, nw))  # 影像縮放
+        dy = tf.random.uniform([], 0, (h - nh), tf.int32)
+        dx = tf.random.uniform([], 0, (w - nw), tf.int32)
+        indexes = tf.meshgrid(tf.range(dy, dy+nh), tf.range(dx, dx+nw), indexing='ij')
+        indexes = tf.stack(indexes, axis=-1)
+        output = tf.scatter_nd(indexes, rsize_x, (h, w, 3))
+        return output, dx, dy
+
+    # 如果將影像放大執行以下以下程式
+    def scale_greater_then_one():
+        rsize_x = tf.image.resize(x, (nh, nw))  # 影像縮放
+        dy = tf.random.uniform([], 0, (nh - h), tf.int32)
+        dx = tf.random.uniform([], 0, (nw - w), tf.int32)
+        return rsize_x[dy:dy + h, dx:dx + w], -dx, -dy
+
+    def scale_equal_zero():
+        return x, 0, 0
+
+    output, dx, dy = tf.case([(tf.less(scale, 1), scale_less_then_one),
+                              (tf.greater(scale, 1), scale_greater_then_one)],
+                             default=scale_equal_zero)
+    # [(tf.less(x, y), f1)]
+
+    # 重新調整bounding box位置
+    y1 = bboxes[0] * scale + tf.cast(dy, dtype=tf.float32)
+    x1 = bboxes[1] * scale + tf.cast(dx, dtype=tf.float32)
+    y2 = bboxes[2] * scale + tf.cast(dy, dtype=tf.float32)
+    x2 = bboxes[3] * scale + tf.cast(dx, dtype=tf.float32)
+    # 如果座標超出範圍將其限制在邊界上
+    y1 = tf.where(y1 < 0, tf.zeros_like(y1), y1)
+    x1 = tf.where(x1 < 0, tf.zeros_like(x1), x1)
+    y2 = tf.where(y2 > h, h * tf.ones_like(y2), y2)
+    x2 = tf.where(x2 > w, w * tf.ones_like(x2), x2)
+    # 找出不存在影像上的bounding box並剔除
+    box_w = x2 - x1
+    box_h = y2 - y1
+    bboxes_filter = tf.logical_and(box_w > 1, box_h > 1)
+    y1 = y1[bboxes_filter]
+    x1 = x1[bboxes_filter]
+    y2 = y2[bboxes_filter]
+    x2 = x2[bboxes_filter]
+    return output, [y1, x1, y2, x2]
+
 
 def color(x):
     """
-     Color change(改變顏色)
-    """
+         Color change(改變顏色)
+
+        :param x:  image inputs, 0~1
+        :return: 返回images
+        """
     x = tf.image.random_hue(x, 0.08)  # 隨機調整影像色調
     x = tf.image.random_saturation(x, 0.6, 1.6)  # 隨機調整影像飽和度
     x = tf.image.random_brightness(x, 0.05)  # 隨機調整影像亮度
     x = tf.image.random_contrast(x, 0.7, 1.3)  # 隨機調整影像對比度
     return x
 
-def rotate(x):
-    """
-    Rotation image(影像旋轉)
-    """
-    # 隨機選轉n次(通過minval和maxval設定n的範圍)，每次選轉90度
-    x = tf.image.rot90(x,tf.random.uniform(shape=[],minval=1,maxval=4,dtype=tf.int32))
-    return x
 
-def zoom(x, scale_min=0.6, scale_max=1.4):
-    """
-    Zoom Image(影像縮放)
-    """
-    h, w, c = x.shape
-    scale = tf.random.uniform([], scale_min, scale_max)  # 隨機縮放比例
-    sh = h * scale  # 縮放後影像長度
-    sw = w * scale  # 縮放後影像寬度
-    x = tf.image.resize(x, (sh, sw))  # 影像縮放
-    x = tf.image.resize_image_with_crop_or_pad(x, h, w)  # 影像裁減和填補
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    import cv2
+    # 取得訓練數據，並順便讀取data的資訊
+    train_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
+    # 取得驗證數據
+    valid_data = tfds.load("voc2007", split=tfds.Split.VALIDATION)
+    # 取得測試數據
+    test_data = tfds.load("voc2007", split=tfds.Split.TEST)
 
-    box[:, [0, 2]] = box[:, [0, 2]] * scale + dx
-    box[:, [1, 3]] = box[:, [1, 3]] * scale + dy
-    return x
+    # h, w = (416, 416)
+    # images = np.zeros((h * 4, w * 4, 3))
+    # for i in range(4):
+    #     for j, data in enumerate(train_data.take(4)):
+    #         img = data['image']
+    #         bboxes = data['objects']['bbox']  # (ymin, xmin, ymax, xmax)
+    #         img = tf.cast(img, tf.float32) / 255.
+    #         img, bboxes = resize(img, bboxes)
+    #         img, bboxes = zoom(img, bboxes)
+    #         bboxes = tf.stack(bboxes, axis=1).numpy()
+    #         img = img.numpy()
+    #         for box in bboxes:
+    #             y1 = tf.cast(box[0], tf.int16).numpy()
+    #             x1 = tf.cast(box[1], tf.int16).numpy()
+    #             y2 = tf.cast(box[2], tf.int16).numpy()
+    #             x2 = tf.cast(box[3], tf.int16).numpy()
+    #             cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    #         images[h * i:h * (i + 1), w * j:w * (j + 1)] = img
+    # plt.figure(figsize=(12, 12))
+    # plt.imshow(images)
+    # plt.show()
 
 
-def parse_aug_fn(dataset):
-    """
-    Image Augmentation(影像增強) function
-    """
-    x = tf.cast(dataset['image'], tf.float32) / 255.  # 影像標準化
-    x = tf.image.resize(x, input_shape)
-    x = flip(x)  # 隨機水平翻轉
-    # 觸發顏色轉換機率50%
-    x = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: color(x), lambda: x)
-    # 觸發影像旋轉機率0.25%
-    x = tf.cond(tf.random.uniform([], 0, 1) > 0.75, lambda: rotate(x), lambda: x)
-    # 觸發影像縮放機率50%
-    x = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x), lambda: x)
-    return x, dataset['label']
-
-def parse_fn(dataset):
-    x = tf.cast(dataset['image'], tf.float32) / 255.  # 影像標準化
-    x = tf.image.resize(x, input_shape)
-    return x, dataset['label']
+    AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
+    train_data = train_data.shuffle(1000)  # 打散資料集
+    train_data = train_data.map(map_func=parse_aug_fn, num_parallel_calls=AUTOTUNE)
+    h, w = (416, 416)
+    images = np.zeros((h * 4, w * 4, 3))
+    for i in range(4):
+        for j, [img, bboxes] in enumerate(train_data.take(4)):
+            # img = data['image']
+            # bboxes = data['objects']['bbox']  # (ymin, xmin, ymax, xmax)
+            # img = tf.cast(img, tf.float32) / 255.
+            # img, bboxes = resize(img, bboxes)
+            # img, bboxes = flip(img, bboxes)
+            # img, bboxes = zoom(img, bboxes)
+            # bboxes = tf.stack(bboxes, axis=1)
+            img = img.numpy()
+            for box in bboxes:
+                y1 = tf.cast(box[0], tf.int16).numpy()
+                x1 = tf.cast(box[1], tf.int16).numpy()
+                y2 = tf.cast(box[2], tf.int16).numpy()
+                x2 = tf.cast(box[3], tf.int16).numpy()
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            images[h * i:h * (i + 1), w * j:w * (j + 1)] = img
+    plt.figure(figsize=(12, 12))
+    plt.imshow(images)
+    plt.show()
