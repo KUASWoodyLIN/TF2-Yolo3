@@ -3,47 +3,32 @@ import tensorflow_datasets as tfds
 import numpy as np
 
 
-# FeaturesDict({
-#     'image': Image(shape=(None, None, 3), dtype=tf.uint8),
-#     'image/filename': Text(shape=(), dtype=tf.string, encoder=None),
-#     'objects': SequenceDict({
-#         'bbox': BBoxFeature(shape=(4,), dtype=tf.float32),
-#         'is_crowd': Tensor(shape=(), dtype=tf.bool),
-#         'label': ClassLabel(shape=(), dtype=tf.int64, num_classes=80),
-#     }),
-# })
-
-# FeaturesDict({
-#     'image': Image(shape=(None, None, 3), dtype=tf.uint8),
-#     'image/filename': Text(shape=(), dtype=tf.string, encoder=None),
-#     'labels': Sequence(shape=(None,), dtype=tf.int64, feature=ClassLabel(shape=(), dtype=tf.int64, num_classes=20)),
-#     'labels_no_difficult': Sequence(shape=(None,), dtype=tf.int64, feature=ClassLabel(shape=(), dtype=tf.int64, num_classes=20)),
-#     'objects': SequenceDict({
-#         'bbox': BBoxFeature(shape=(4,), dtype=tf.float32),
-#         'is_difficult': Tensor(shape=(), dtype=tf.bool),
-#         'is_truncated': Tensor(shape=(), dtype=tf.bool),
-#         'label': ClassLabel(shape=(), dtype=tf.int64, num_classes=20),
-#         'pose': ClassLabel(shape=(), dtype=tf.int64, num_classes=5),
-#     }),
-# })
-def parse_aug_fn(dataset):
+# @tf.function
+def parse_aug_fn(dataset, input_size=(416, 416)):
     """
     Image Augmentation function
     """
+    ih, iw = input_size
     # (None, None, 3)
     x = tf.cast(dataset['image'], tf.float32) / 255.
     # (y1, x1, y2, x2, class)
-    y = dataset['objects']['bbox']
-    x, y = resize(x, y)
+    bbox = dataset['objects']['bbox']
+    label = tf.expand_dims(tf.cast(dataset['objects']['label'], tf.float32), axis=-1)
+    x, bbox = resize(x, bbox, input_size)
 
     # 觸發顏色轉換機率50%
     x = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: color(x), lambda: x)
     # 觸發影像翻轉機率50%
-    x, y = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: flip(x, y), lambda: (x, y))
+    x, bbox = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: flip(x, bbox), lambda: (x, bbox))
     # 觸發影像縮放機率50%
-    x, y = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x, y), lambda: (x, y))
+    x, bbox = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x, bbox), lambda: (x, bbox))
     # 將[y1, x1, y2, x2]合為shape=(x, 4)的Tensor
-    y = tf.stack(y, axis=1)
+    bbox = tf.stack(bbox, axis=1)
+    bbox = tf.divide(bbox, [ih, iw, ih, iw])
+    y = tf.concat([bbox, label], axis=-1)
+    paddings = [[0, 100 - tf.shape(bbox)[0]], [0, 0]]
+    y = tf.pad(y, paddings)
+    y = tf.ensure_shape(y, (100, 5))
     return x, y
 
 
@@ -54,7 +39,52 @@ def parse_fn(dataset):
     return x, y
 
 
-def transform_targets(y_train, anchors, anchor_masks, classes):
+@tf.function
+def transform_targets_for_output(y_true, grid_size, anchor_idxs):
+    # y_true: (N, boxes, (x1, y1, x2, y2, class, best_anchor))
+    N = tf.shape(y_true)[0]
+
+    # y_true_out: (N, grid, grid, anchors, [x, y, w, h, obj, class])
+    y_true_out = tf.zeros((N, grid_size, grid_size, tf.shape(anchor_idxs)[0], 6))
+
+    anchor_idxs = tf.cast(anchor_idxs, tf.int32)
+
+    indexes = tf.TensorArray(tf.int32, 1, dynamic_size=True)
+    updates = tf.TensorArray(tf.float32, 1, dynamic_size=True)
+    idx = 0
+    for i in tf.range(N):
+        for j in tf.range(tf.shape(y_true)[1]):
+            if tf.equal(y_true[i][j][2], 0):
+                continue
+            anchor_eq = tf.equal(
+                anchor_idxs, tf.cast(y_true[i][j][5], tf.int32))
+
+            if tf.reduce_any(anchor_eq):
+                box = y_true[i][j][0:4]
+                box_xy = (y_true[i][j][0:2] + y_true[i][j][2:4]) / 2
+
+                anchor_idx = tf.cast(tf.where(anchor_eq), tf.int32)
+                grid_xy = tf.cast(box_xy // (1/grid_size), tf.int32)
+
+                # grid[y][x][anchor] = (tx, ty, bw, bh, obj, class)
+                indexes = indexes.write(idx, [i, grid_xy[1], grid_xy[0], anchor_idx[0][0]])
+                updates = updates.write(idx, [box[0], box[1], box[2], box[3], 1, y_true[i][j][4]])
+                idx += 1
+
+    return tf.tensor_scatter_nd_update(y_true_out, indexes.stack(), updates.stack())
+
+
+def transform_targets(x_train, y_train, anchors, anchor_masks):
+    """
+        transform y_label to training target label,
+        (y1, x1, y2, x2, class) -> (N, grid_size, grid_size, anchor, [x, y, w, h, obj, class])
+
+        :param y_train: (y1, x1, y2, x2, class)
+        :param anchors: yolo anchors setting
+        :param anchor_masks: yolo anchors mask
+        :param classes: classes number
+        :return:
+        """
     y_outs = []
     grid_size = 13
 
@@ -75,13 +105,13 @@ def transform_targets(y_train, anchors, anchor_masks, classes):
 
     for anchor_idxs in anchor_masks:
         y_outs.append(transform_targets_for_output(
-            y_train, grid_size, anchor_idxs, classes))
+            y_train, grid_size, anchor_idxs))
         grid_size *= 2
 
-    return tuple(y_outs)
+    return x_train, tuple(y_outs)
 
 
-def resize(x, bboxes, input_size=(416, 416)):
+def resize(x, bboxes, input_size):
     """
         Resize Image(影像縮放)
 
@@ -211,43 +241,15 @@ if __name__ == "__main__":
     # 取得測試數據
     test_data = tfds.load("voc2007", split=tfds.Split.TEST)
 
-    # h, w = (416, 416)
-    # images = np.zeros((h * 4, w * 4, 3))
-    # for i in range(4):
-    #     for j, data in enumerate(train_data.take(4)):
-    #         img = data['image']
-    #         bboxes = data['objects']['bbox']  # (ymin, xmin, ymax, xmax)
-    #         img = tf.cast(img, tf.float32) / 255.
-    #         img, bboxes = resize(img, bboxes)
-    #         img, bboxes = zoom(img, bboxes)
-    #         bboxes = tf.stack(bboxes, axis=1).numpy()
-    #         img = img.numpy()
-    #         for box in bboxes:
-    #             y1 = tf.cast(box[0], tf.int16).numpy()
-    #             x1 = tf.cast(box[1], tf.int16).numpy()
-    #             y2 = tf.cast(box[2], tf.int16).numpy()
-    #             x2 = tf.cast(box[3], tf.int16).numpy()
-    #             cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    #         images[h * i:h * (i + 1), w * j:w * (j + 1)] = img
-    # plt.figure(figsize=(12, 12))
-    # plt.imshow(images)
-    # plt.show()
-
-
+    # Augmentation test
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
     train_data = train_data.shuffle(1000)  # 打散資料集
-    train_data = train_data.map(map_func=parse_aug_fn, num_parallel_calls=AUTOTUNE)
+    train_data = train_data.map(lambda dataset: parse_aug_fn(dataset),
+                                num_parallel_calls=AUTOTUNE)
     h, w = (416, 416)
     images = np.zeros((h * 4, w * 4, 3))
     for i in range(4):
         for j, [img, bboxes] in enumerate(train_data.take(4)):
-            # img = data['image']
-            # bboxes = data['objects']['bbox']  # (ymin, xmin, ymax, xmax)
-            # img = tf.cast(img, tf.float32) / 255.
-            # img, bboxes = resize(img, bboxes)
-            # img, bboxes = flip(img, bboxes)
-            # img, bboxes = zoom(img, bboxes)
-            # bboxes = tf.stack(bboxes, axis=1)
             img = img.numpy()
             for box in bboxes:
                 y1 = tf.cast(box[0], tf.int16).numpy()
@@ -259,3 +261,18 @@ if __name__ == "__main__":
     plt.figure(figsize=(12, 12))
     plt.imshow(images)
     plt.show()
+
+    # Targets transform test
+    # yolo_anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),
+    #                          (59, 119), (116, 90), (156, 198), (373, 326)],
+    #                         np.float32) / 416
+    # yolo_anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+    # anchors = yolo_anchors
+    # anchor_masks = yolo_anchor_masks
+    # train_data = train_data.shuffle(1000)  # 打散資料集
+    # train_data = train_data.map(lambda dataset: parse_aug_fn(dataset),
+    #                             num_parallel_calls=AUTOTUNE)
+    # train_data = train_data.batch(1)
+    # train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks),
+    #                             num_parallel_calls=AUTOTUNE)
+    # train_data = train_data.prefetch(buffer_size=AUTOTUNE)
