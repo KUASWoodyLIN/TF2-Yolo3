@@ -6,7 +6,6 @@ def darknetconv2d(x, filters, kernel_size, strides=(1, 1)):
     padding = 'valid' if strides == (2, 2) else 'same'
     x = layers.Conv2D(filters, kernel_size, strides,
                       padding=padding,
-                      use_bias=False,
                       kernel_regularizer=tf.keras.regularizers.l2(5e-4))(x)
     return x
 
@@ -32,14 +31,15 @@ def resblock_body(x, num_filters, num_blocks):
     return x
 
 
-def darknet_body(x):
+def darknet_body(name=None):
     '''Darknent body having 52 Convolution2D layers'''
+    x = inputs = tf.keras.Input([None, None, 3])
     x = darknetconv2d_bn_leaky(x, 32, (3, 3))
     x = resblock_body(x, 64, 1)
     x = resblock_body(x, 128, 2)
-    x = resblock_body(x, 256, 8)
-    x = resblock_body(x, 512, 8)
+    x = x_26 = resblock_body(x, 256, 8)
+    x = x_43 = resblock_body(x, 512, 8)
     x = resblock_body(x, 1024, 4)
-    return x
+    return tf.keras.Model(inputs, (x_26, x_43, x), name=name)
 
 

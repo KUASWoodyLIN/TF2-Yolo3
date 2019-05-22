@@ -6,35 +6,37 @@ from tensorflow.python.keras.losses import LossFunctionWrapper
 class YoloLoss(LossFunctionWrapper):
     def __init__(self,
                  anchors,
+                 classes=80,
                  ignore_thresh=0.5,
                  name='yolo_loss'):
         super(YoloLoss, self).__init__(
             yolo_loss,
             name=name,
             anchors=anchors,
+            classes=classes,
             ignore_thresh=ignore_thresh)
 
 
-def yolo_loss(y_true, y_pred, anchors, ignore_thresh=0.5):
+def yolo_loss(y_true, y_pred, anchors, classes=80, ignore_thresh=0.5):
     """
 
     :param y_true: labels inputs
     :param y_pred: predict outputs
     :param anchors: layer anchors size:(3, 2)
+    :param classes: classes of dataset
     :param ignore_thresh: if (IoU < threshold) and ignore
     :return: total loss (xy_loss + wh_loss + confidence_loss + class_loss)
     """
     # 1. transform all pred outputs
     # y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))
-    pred_box, pred_obj, pred_class, pred_xywh = y_pred
+    pred_box, pred_obj, pred_class, pred_xywh = yolo_boxes(y_pred, anchors, classes)
     pred_xy = pred_xywh[..., 0:2]
     pred_wh = pred_xywh[..., 2:4]
 
     # 2. transform all true outputs
     # y_true: (batch_size, grid, grid, anchors, (x1, y1, x2, y2, obj, cls))
     # true_box: (batch_size, grid, grid, anchors, (x1, y1, x2, y2))     # 0~1
-    true_box, true_obj, true_class_idx = tf.split(
-        y_true, (4, 1, 1), axis=-1)
+    true_box, true_obj, true_class_idx = tf.split(y_true, (4, 1, 1), axis=-1)
     true_xy = (true_box[..., 0:2] + true_box[..., 2:4]) / 2
     true_wh = true_box[..., 2:4] - true_box[..., 0:2]
 
@@ -42,7 +44,8 @@ def yolo_loss(y_true, y_pred, anchors, ignore_thresh=0.5):
     box_loss_scale = 2 - true_wh[..., 0] * true_wh[..., 1]
 
     # 3. inverting the pred box equations
-    grid_h, grid_w = tf.shape(y_true)[1:3]
+    # grid_h, grid_w = y_true.get_shape()[1:3]
+    grid_h, grid_w = tf.shape(y_true)[1], tf.shape(y_true)[2]
     grid = tf.meshgrid(tf.range(grid_w), tf.range(grid_h))
     grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
     # ex: (0.5, 0.5) * (13, 13) - (6, 6)
@@ -73,6 +76,31 @@ def yolo_loss(y_true, y_pred, anchors, ignore_thresh=0.5):
     class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))
 
     return xy_loss + wh_loss + confidence_loss + class_loss
+
+
+def yolo_boxes(pred, anchors, classes):
+    # pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))
+    grid_h, grid_w = tf.shape(pred)[1], tf.shape(pred)[2]
+    box_xy, box_wh, box_confidence, box_class_probs = tf.split(pred, (2, 2, 1, classes), axis=-1)
+
+    box_xy = tf.sigmoid(box_xy)  # scale to 0~1
+    box_confidence = tf.sigmoid(box_confidence)  # scale to 0~1
+    box_class_probs = tf.sigmoid(box_class_probs)  # scale to 0~1
+    pred_box = tf.concat((box_xy, box_wh), axis=-1)  # original x,y,w,h for loss function
+
+    grid = tf.meshgrid(tf.range(grid_w), tf.range(grid_h))
+    grid = tf.stack(grid, axis=-1)  # (gx, gy, 2)
+    grid = tf.expand_dims(grid, axis=2)  # (gx, gy, 1, 2)
+
+    # box_xy: (batch, grid_h, grid_w, anchors, (x, y))
+    # each box (x, y)
+    box_xy = (box_xy + tf.cast(grid, box_xy.dtype)) / tf.cast((grid_w, grid_h), box_xy.dtype)
+    box_wh = tf.exp(box_wh) * anchors
+
+    box_x1y1 = box_xy - box_wh / 2
+    box_x2y2 = box_xy + box_wh / 2
+    bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
+    return bbox, box_confidence, box_class_probs, pred_box
 
 
 def broadcast_iou(pred_box, true_box):

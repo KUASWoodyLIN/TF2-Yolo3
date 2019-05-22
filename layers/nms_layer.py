@@ -5,9 +5,11 @@ class NMSLayer(tf.keras.layers.Layer):
     """
     Non maximum suppression Layer
     """
-    def __init__(self, num_classes, **kwargs):
+    def __init__(self, num_classes, iou_threshold, score_threshold, **kwargs):
         super(NMSLayer, self).__init__(**kwargs)
         self.num_classes = num_classes
+        self.iou_threshold = iou_threshold
+        self.score_threshold = score_threshold
 
     def call(self, inputs, **kwargs):
         bboxes, box_conf, box_class = [], [], []
@@ -26,7 +28,7 @@ class NMSLayer(tf.keras.layers.Layer):
             scores=tf.reshape(scores, (tf.shape(scores)[0], -1, self.num_classes)),
             max_output_size_per_class=100,
             max_total_size=100,
-            iou_threshold=0.5,
-            score_threshold=0.5
+            iou_threshold=self.iou_threshold,
+            score_threshold=self.score_threshold
         )
         return boxes, scores, classes, valid_detections

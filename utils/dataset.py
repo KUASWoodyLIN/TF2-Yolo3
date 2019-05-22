@@ -13,7 +13,8 @@ def parse_aug_fn(dataset, input_size=(416, 416)):
     x = tf.cast(dataset['image'], tf.float32) / 255.
     # (y1, x1, y2, x2, class)
     bbox = dataset['objects']['bbox']
-    label = tf.expand_dims(tf.cast(dataset['objects']['label'], tf.float32), axis=-1)
+    label = tf.cast(dataset['objects']['label'], tf.float32)
+
     x, bbox = resize(x, bbox, input_size)
 
     # 觸發顏色轉換機率50%
@@ -21,13 +22,11 @@ def parse_aug_fn(dataset, input_size=(416, 416)):
     # 觸發影像翻轉機率50%
     x, bbox = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: flip(x, bbox), lambda: (x, bbox))
     # 觸發影像縮放機率50%
-    x, bbox = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x, bbox), lambda: (x, bbox))
-    # 將[y1, x1, y2, x2]合為shape=(x, 4)的Tensor
-    bbox = tf.stack(bbox, axis=1)
-    bbox = tf.divide(bbox, [ih, iw, ih, iw])
-
-    y = tf.concat([bbox, label], axis=-1)
-    paddings = [[0, 100 - tf.shape(bbox)[0]], [0, 0]]
+    x, bbox, label = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x, bbox, label), lambda: (x, bbox, label))
+    # 將[y1, x1, y2, x2, classes]合為shape=(x, 5)的Tensor
+    y = tf.stack([*bbox, label], axis=-1)
+    y = tf.divide(y, [ih, iw, ih, iw, 1])
+    paddings = [[0, 100 - tf.shape(y)[0]], [0, 0]]
     y = tf.pad(y, paddings)
     y = tf.ensure_shape(y, (100, 5))
     return x, y
@@ -40,14 +39,14 @@ def parse_fn(dataset, anchors, anchor_masks, input_size=(416, 416)):
     # (None, [y1, x1, y2, x2])
     bbox = dataset['objects']['bbox']
     # (None, classes, 1)
-    label = tf.expand_dims(tf.cast(dataset['objects']['label'], tf.float32), axis=-1)
+    label = tf.cast(dataset['objects']['label'], tf.float32)
     # 將影像縮放到模型輸入大小
     x, bbox = resize(x, bbox, input_size)
 
-    y = tf.concat([bbox, label], axis=-1)
-    paddings = [[0, 100 - tf.shape(bbox)[0]], [0, 0]]
+    y = tf.stack([*bbox, label], axis=-1)
+    paddings = [[0, 0], [0, 100 - tf.shape(bbox)[0]], [0, 0]]
     y = tf.pad(y, paddings)
-    y = tf.ensure_shape(y, (100, 5))
+    y = tf.ensure_shape(y, (None, 100, 5))
     x, y = transform_targets(x, y, anchors, anchor_masks)
     return x, y
 
@@ -68,8 +67,7 @@ def transform_targets_for_output(y_true, grid_size, anchor_idxs):
         for j in tf.range(tf.shape(y_true)[1]):
             if tf.equal(y_true[i][j][2], 0):
                 continue
-            anchor_eq = tf.equal(
-                anchor_idxs, tf.cast(y_true[i][j][5], tf.int32))
+            anchor_eq = tf.equal(anchor_idxs, tf.cast(y_true[i][j][5], tf.int32))
 
             if tf.reduce_any(anchor_eq):
                 box = y_true[i][j][0:4]
@@ -82,7 +80,6 @@ def transform_targets_for_output(y_true, grid_size, anchor_idxs):
                 indexes = indexes.write(idx, [i, grid_xy[1], grid_xy[0], anchor_idx[0][0]])
                 updates = updates.write(idx, [box[0], box[1], box[2], box[3], 1, y_true[i][j][4]])
                 idx += 1
-
     return tf.tensor_scatter_nd_update(y_true_out, indexes.stack(), updates.stack())
 
 
@@ -115,8 +112,7 @@ def transform_targets(x_train, y_train, anchors, anchor_masks):
     y_train = tf.concat([y_train, anchor_idx], axis=-1)
 
     for anchor_idxs in anchor_masks:
-        y_outs.append(transform_targets_for_output(
-            y_train, grid_size, anchor_idxs))
+        y_outs.append(transform_targets_for_output(y_train, grid_size, anchor_idxs))
         grid_size *= 2
 
     return x_train, tuple(y_outs)
@@ -161,7 +157,7 @@ def flip(x, bboxes):
     return x, [y1, x1, y2, x2]
 
 
-def zoom(x, bboxes, scale_min=0.6, scale_max=1.4):
+def zoom(x, bboxes, label, scale_min=0.6, scale_max=1.4):
     """
         Zoom Image(影像縮放)
 
@@ -197,8 +193,8 @@ def zoom(x, bboxes, scale_min=0.6, scale_max=1.4):
     def scale_equal_zero():
         return x, 0, 0
 
-    output, dx, dy = tf.case([(tf.less(scale, 1), scale_less_then_one),
-                              (tf.greater(scale, 1), scale_greater_then_one)],
+    output, dx, dy = tf.case([(tf.logical_or(tf.less(nh - h, 0), tf.less(nw - w, 0)), scale_less_then_one),
+                              (tf.logical_or(tf.greater(nh - h, 0), tf.greater(nw - w, 0)), scale_greater_then_one)],
                              default=scale_equal_zero)
     # [(tf.less(x, y), f1)]
 
@@ -220,7 +216,8 @@ def zoom(x, bboxes, scale_min=0.6, scale_max=1.4):
     x1 = x1[bboxes_filter]
     y2 = y2[bboxes_filter]
     x2 = x2[bboxes_filter]
-    return output, [y1, x1, y2, x2]
+    label = label[bboxes_filter]
+    return output, [y1, x1, y2, x2], label
 
 
 def color(x):
@@ -240,6 +237,8 @@ def color(x):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import cv2
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
 
@@ -253,6 +252,7 @@ if __name__ == "__main__":
         images = np.zeros((_h * 4, _w * 4, 3))
         for i in range(4):
             for j, [img, bboxes] in enumerate(train_data.take(4)):
+                bboxes = tf.multiply(bboxes, [_h, _w, _h, _w, 1])
                 img = img.numpy()
                 for box in bboxes:
                     _y1 = tf.cast(box[0], tf.int16).numpy()
@@ -277,10 +277,13 @@ if __name__ == "__main__":
         train_data = train_data.shuffle(1000)  # 打散資料集
         train_data = train_data.map(lambda dataset: parse_aug_fn(dataset),
                                     num_parallel_calls=AUTOTUNE)
-        train_data = train_data.batch(1)
+        train_data = train_data.batch(32)
         train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks),
                                     num_parallel_calls=AUTOTUNE)
         train_data = train_data.prefetch(buffer_size=AUTOTUNE)
+
+        for x_batch, y_batch in train_data.take(500):
+            print(True)
 
     # Augmentation test
     test_augmentation()
