@@ -44,10 +44,10 @@ def parse_fn(dataset, anchors, anchor_masks, input_size=(416, 416)):
     x, bbox = resize(x, bbox, input_size)
 
     y = tf.stack([*bbox, label], axis=-1)
+    y = tf.divide(y, [ih, iw, ih, iw, 1])
     paddings = [[0, 100 - tf.shape(y)[0]], [0, 0]]
     y = tf.pad(y, paddings)
     y = tf.ensure_shape(y, (100, 5))
-    # x, y = transform_targets(x, y, anchors, anchor_masks)
     return x, y
 
 
