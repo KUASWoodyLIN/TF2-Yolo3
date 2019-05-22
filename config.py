@@ -18,7 +18,7 @@ size_w = 416
 step1_batch_size = 30
 step1_learning_rate = 1e-3
 step1_epochs = 50
-step2_batch_size = 10
+step2_batch_size = 8
 step2_learning_rate = 1e-4
 step2_epochs = 100
 

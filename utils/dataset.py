@@ -44,10 +44,10 @@ def parse_fn(dataset, anchors, anchor_masks, input_size=(416, 416)):
     x, bbox = resize(x, bbox, input_size)
 
     y = tf.stack([*bbox, label], axis=-1)
-    paddings = [[0, 0], [0, 100 - tf.shape(bbox)[0]], [0, 0]]
+    paddings = [[0, 100 - tf.shape(y)[0]], [0, 0]]
     y = tf.pad(y, paddings)
-    y = tf.ensure_shape(y, (None, 100, 5))
-    x, y = transform_targets(x, y, anchors, anchor_masks)
+    y = tf.ensure_shape(y, (100, 5))
+    # x, y = transform_targets(x, y, anchors, anchor_masks)
     return x, y
 
 
@@ -241,10 +241,16 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
+    yolo_anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),
+                             (59, 119), (116, 90), (156, 198), (373, 326)],
+                            np.float32) / 416
+    yolo_anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+    anchors = yolo_anchors
+    anchor_masks = yolo_anchor_masks
 
     def test_augmentation():
         # 取得訓練數據，並順便讀取data的資訊
-        train_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
+        train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)
         train_data = train_data.shuffle(1000)  # 打散資料集
         train_data = train_data.map(lambda dataset: parse_aug_fn(dataset),
                                     num_parallel_calls=AUTOTUNE)
@@ -266,14 +272,8 @@ if __name__ == "__main__":
         plt.show()
 
     def test_label_transform():
-        yolo_anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),
-                                 (59, 119), (116, 90), (156, 198), (373, 326)],
-                                np.float32) / 416
-        yolo_anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
-        anchors = yolo_anchors
-        anchor_masks = yolo_anchor_masks
         # 取得訓練數據，並順便讀取data的資訊
-        train_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
+        train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)
         train_data = train_data.shuffle(1000)  # 打散資料集
         train_data = train_data.map(lambda dataset: parse_aug_fn(dataset),
                                     num_parallel_calls=AUTOTUNE)

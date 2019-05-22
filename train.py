@@ -26,7 +26,6 @@ def training_model(model, callbacks, step=1):
     # Training dataset setting
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
     train_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)    # 取得訓練數據
-    valid_data = tfds.load("voc2007", split=tfds.Split.VALIDATION)    # 取得驗證數據
     train_data = train_data.shuffle(1000)  # 打散資料集
     train_data = train_data.map(lambda dataset: parse_aug_fn(dataset), num_parallel_calls=AUTOTUNE)
     train_data = train_data.batch(batch_size)
@@ -35,10 +34,11 @@ def training_model(model, callbacks, step=1):
     train_data = train_data.prefetch(buffer_size=AUTOTUNE)
 
     # Validation dataset setting
-    valid_data = valid_data.batch(batch_size)
-    valid_data = valid_data.map(lambda dataset: parse_fn(dataset, anchors, anchor_masks),
-                                num_parallel_calls=AUTOTUNE)
-    valid_data = valid_data.prefetch(buffer_size=AUTOTUNE)
+    val_data = tfds.load("voc2007", split=tfds.Split.VALIDATION)
+    val_data = val_data.map(lambda dataset: parse_fn(dataset, anchors, anchor_masks), num_parallel_calls=AUTOTUNE)
+    val_data = val_data.batch(batch_size)
+    val_data = val_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks), num_parallel_calls=AUTOTUNE)
+    val_data = val_data.prefetch(buffer_size=AUTOTUNE)
 
     # Training
     optimizer = tf.keras.optimizers.Adam(lr=learning_rate)
@@ -46,7 +46,7 @@ def training_model(model, callbacks, step=1):
     model.fit(train_data,
               epochs=epochs,
               callbacks=callbacks,
-              validation_data=valid_data)
+              validation_data=val_data)
 
 
 def main():
@@ -69,14 +69,14 @@ def main():
     model_ep = tf.keras.callbacks.EarlyStopping(patience=10, verbose=1)
     mdoel_rlr = tf.keras.callbacks.ReduceLROnPlateau(verbose=1)
 
-    # # Freeze layers
-    # trainable_model(darknet, trainable=False)
-    #
-    # # 1) Training model step1
-    # print("Start teraining Step1")
-    # training_model(model,
-    #                callbacks=[model_tb, model_mckp],
-    #                step=1)
+    # Freeze layers
+    trainable_model(darknet, trainable=False)
+
+    # 1) Training model step1
+    print("Start teraining Step1")
+    training_model(model,
+                   callbacks=[model_tb, model_mckp],
+                   step=1)
 
     # Unfreeze layers
     darknet = model.get_layer('Yolo_DarkNet')
