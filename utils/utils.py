@@ -1,4 +1,3 @@
-from absl import logging
 import tensorflow as tf
 import numpy as np
 
@@ -22,8 +21,7 @@ def load_darknet_weights(model, weights_file):
                 layers_list[i + next_norm].name.startswith('batch_normalization'):
             batch_norm = layers_list[i + next_norm]
 
-        logging.info("{}/{} {}".format(
-            model.name, layer.name, 'bn' if batch_norm else 'bias'))
+        print("{}/{} {}".format(model.name, layer.name, 'bn' if batch_norm else 'bias'))
 
         filters = layer.filters
         size = layer.kernel_size[0]

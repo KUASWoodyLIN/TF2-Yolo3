@@ -23,8 +23,9 @@ def parse_aug_fn(dataset, input_size=(416, 416)):
     x, bbox = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: flip(x, bbox), lambda: (x, bbox))
     # 觸發影像縮放機率50%
     x, bbox, label = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x, bbox, label), lambda: (x, bbox, label))
-    # 將[y1, x1, y2, x2, classes]合為shape=(x, 5)的Tensor
-    y = tf.stack([*bbox, label], axis=-1)
+
+    # 將[x1, y1, x2, y2, classes]合為shape=(x, 5)的Tensor
+    y = tf.stack([bbox[1], bbox[0], bbox[3], bbox[2], label], axis=-1)
     y = tf.divide(y, [ih, iw, ih, iw, 1])
     paddings = [[0, 100 - tf.shape(y)[0]], [0, 0]]
     y = tf.pad(y, paddings)
@@ -32,7 +33,7 @@ def parse_aug_fn(dataset, input_size=(416, 416)):
     return x, y
 
 
-def parse_fn(dataset, anchors, anchor_masks, input_size=(416, 416)):
+def parse_fn(dataset, input_size=(416, 416)):
     ih, iw = input_size
     # (None, None, None, 3)
     x = tf.cast(dataset['image'], tf.float32) / 255.
@@ -43,11 +44,27 @@ def parse_fn(dataset, anchors, anchor_masks, input_size=(416, 416)):
     # 將影像縮放到模型輸入大小
     x, bbox = resize(x, bbox, input_size)
 
-    y = tf.stack([*bbox, label], axis=-1)
+    # 將[x1, y1, x2, y2, classes]合為shape=(x, 5)的Tensor
+    y = tf.stack([bbox[1], bbox[0], bbox[3], bbox[2], label], axis=-1)
     y = tf.divide(y, [ih, iw, ih, iw, 1])
     paddings = [[0, 100 - tf.shape(y)[0]], [0, 0]]
     y = tf.pad(y, paddings)
     y = tf.ensure_shape(y, (100, 5))
+    return x, y
+
+
+def parse_fn_test(dataset, input_size=(416, 416)):
+    # (None, None, None, 3)
+    x = tf.cast(dataset['image'], tf.float32) / 255.
+    # (None, [y1, x1, y2, x2])
+    bbox = dataset['objects']['bbox']
+    # (None, classes, 1)
+    label = tf.cast(dataset['objects']['label'], tf.float32)
+
+    x, bbox = resize(x, bbox, input_size)
+
+    # 將[x1, y1, x2, y2, classes]合為shape=(x, 5)的Tensor
+    y = tf.stack([bbox[1], bbox[0], bbox[3], bbox[2], label], axis=-1)
     return x, y
 
 
@@ -238,7 +255,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import cv2
     import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
     yolo_anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),
@@ -250,26 +267,40 @@ if __name__ == "__main__":
 
     def test_augmentation():
         # 取得訓練數據，並順便讀取data的資訊
-        train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)
+        train_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
         train_data = train_data.shuffle(1000)  # 打散資料集
         train_data = train_data.map(lambda dataset: parse_aug_fn(dataset),
                                     num_parallel_calls=AUTOTUNE)
-        _h, _w = (416, 416)
-        images = np.zeros((_h * 4, _w * 4, 3))
-        for i in range(4):
-            for j, [img, bboxes] in enumerate(train_data.take(4)):
-                bboxes = tf.multiply(bboxes, [_h, _w, _h, _w, 1])
-                img = img.numpy()
-                for box in bboxes:
-                    _y1 = tf.cast(box[0], tf.int16).numpy()
-                    _x1 = tf.cast(box[1], tf.int16).numpy()
-                    _y2 = tf.cast(box[2], tf.int16).numpy()
-                    _x2 = tf.cast(box[3], tf.int16).numpy()
-                    cv2.rectangle(img, (_x1, _y1), (_x2, _y2), (0, 255, 0), 2)
-                images[_h * i:_h * (i + 1), _w * j:_w * (j + 1)] = img
+        classes_list = info.features['labels'].names
+
+        h, w = (416, 416)
+        images = np.zeros((h * 4, w * 4, 3))
+        for count, [img, bboxes] in enumerate(train_data.take(16)):
+            bboxes = tf.multiply(bboxes, [h, w, h, w, 1])
+            img = img.numpy()
+            box_indices = tf.where(tf.reduce_sum(bboxes, axis=-1))
+            bboxes = tf.gather_nd(bboxes, box_indices)
+            for box in bboxes:
+                x1 = tf.cast(box[0], tf.int16).numpy()
+                y1 = tf.cast(box[1], tf.int16).numpy()
+                x2 = tf.cast(box[2], tf.int16).numpy()
+                y2 = tf.cast(box[3], tf.int16).numpy()
+                label = classes_list[box[4]]
+                print(label)
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(img,
+                            label,
+                            (x1, y1 - 3),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (0, 255, 0), 2)
+
+            i = count // 4
+            j = count % 4
+            images[h * i:h * (i + 1), w * j:w * (j + 1)] = img
         plt.figure(figsize=(12, 12))
         plt.imshow(images)
         plt.show()
+
 
     def test_label_transform():
         # 取得訓練數據，並順便讀取data的資訊
@@ -288,4 +319,4 @@ if __name__ == "__main__":
     # Augmentation test
     test_augmentation()
     # Targets transform test
-    test_label_transform()
+    # test_label_transform()

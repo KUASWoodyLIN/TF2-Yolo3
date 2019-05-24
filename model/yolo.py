@@ -20,7 +20,7 @@ def make_last_layers(x, num_filters, num_anchors, num_classes):
     x = darknetconv2d_bn_leaky(x, num_filters * 2, (3, 3))
     x = darknetconv2d_bn_leaky(x, num_filters, (1, 1))
     y = darknetconv2d_bn_leaky(x, num_filters*2, (3, 3))
-    y = darknetconv2d(y, out_filters, (1, 1))
+    y = darknetconv2d(y, out_filters, (1, 1), num_classes=num_classes)
     y = YoloOutputLayer(num_anchors, num_classes)(y)
     return x, y
 
@@ -42,7 +42,7 @@ def yolov3_tiny(inputs, num_anchors, num_classes):
     x2 = darknetconv2d_bn_leaky(x2, 1024, (3, 3))
     x2 = darknetconv2d_bn_leaky(x2, 256, (1, 1))
 
-    y1 = darknetconv2d_bn_leaky(x2, 512, (3,3))
+    y1 = darknetconv2d_bn_leaky(x2, 512, (3, 3))
     y1 = darknetconv2d_bn_leaky(y1, num_anchors*(num_classes+5), (1,1))
 
     x2 = darknetconv2d_bn_leaky(x2, 128, (1, 1))
@@ -54,9 +54,10 @@ def yolov3_tiny(inputs, num_anchors, num_classes):
     return Model(inputs, [y1, y2])
 
 
-def yolov3(inputs, anchors=yolo_anchors, num_classes=80, iou_threshold=0.5, score_threshold=0.5, training=False):
+def yolov3(input_size, anchors=yolo_anchors, num_classes=80, iou_threshold=0.5, score_threshold=0.5, training=False):
     """Create YOLO_V3 model CNN body in Keras."""
     num_anchors = len(anchors) // 3
+    inputs = Input(input_size)
     x_26, x_43, x = darknet_body(name='Yolo_DarkNet')(inputs)
     x, y1 = make_last_layers(x, 512, num_anchors, num_classes)
 

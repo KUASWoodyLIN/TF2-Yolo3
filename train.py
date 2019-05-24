@@ -2,30 +2,34 @@ import config
 import tensorflow as tf
 import tensorflow_datasets as tfds
 from losses import YoloLoss
-from model.yolo import yolov3
+from model import yolov3
 from utils import parse_aug_fn, parse_fn, transform_targets, trainable_model
 
 # Anchors setting
 anchors = config.yolo_anchors
 anchor_masks = config.yolo_anchor_masks
 
+
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
-def training_model(model, callbacks, step=1):
+def training_model(model, callbacks, classes=80, step=1):
     if step == 1:
         batch_size = config.step1_batch_size
         learning_rate = config.step1_learning_rate
-        epochs = config.step1_epochs
+        start_epochs = config.step1_start_epochs
+        end_epochs = config.step1_end_epochs
+
     else:
         batch_size = config.step2_batch_size
         learning_rate = config.step2_learning_rate
-        epochs = config.step2_epochs
+        start_epochs = config.step2_start_epochs
+        end_epochs = config.step2_end_epochs
 
     # Training dataset setting
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
-    train_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)    # 取得訓練數據
+    train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)    # 取得訓練數據
     train_data = train_data.shuffle(1000)  # 打散資料集
     train_data = train_data.map(lambda dataset: parse_aug_fn(dataset), num_parallel_calls=AUTOTUNE)
     train_data = train_data.batch(batch_size)
@@ -35,57 +39,65 @@ def training_model(model, callbacks, step=1):
 
     # Validation dataset setting
     val_data = tfds.load("voc2007", split=tfds.Split.VALIDATION)
-    val_data = val_data.map(lambda dataset: parse_fn(dataset, anchors, anchor_masks), num_parallel_calls=AUTOTUNE)
+    val_data = val_data.map(lambda dataset: parse_fn(dataset), num_parallel_calls=AUTOTUNE)
     val_data = val_data.batch(batch_size)
     val_data = val_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks), num_parallel_calls=AUTOTUNE)
     val_data = val_data.prefetch(buffer_size=AUTOTUNE)
 
     # Training
     optimizer = tf.keras.optimizers.Adam(lr=learning_rate)
-    model.compile(optimizer=optimizer, loss=[YoloLoss(anchors[mask]) for mask in anchor_masks], run_eagerly=False)
+    model.compile(optimizer=optimizer, loss=[YoloLoss(anchors[mask], classes=classes) for mask in anchor_masks], run_eagerly=False)
     model.fit(train_data,
-              epochs=epochs,
+              epochs=end_epochs,
               callbacks=callbacks,
-              validation_data=val_data)
+              validation_data=val_data,
+              initial_epoch=start_epochs)
 
 
 def main():
+    # Dataset Info
+    _, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
+    classes = info.features['labels'].num_classes
+
+
     # Create model
-    inputs_ = tf.keras.Input((config.size_h, config.size_w, 3))
-    model = yolov3(inputs_, training=True)
+    model = yolov3((config.size_h, config.size_w, 3), num_classes=classes, training=True)
     model.summary()
 
     # Load Weights
-    darknet = model.get_layer('Yolo_DarkNet')
-    darknet.load_weights(config.yolo_weights, by_name=True)
+    model.load_weights(config.yolo_weights, by_name=True)
 
     # Callbacks function
     log_dir = 'logs-yolo'
+    model_dir = log_dir + '/models'
+    os.makedirs(model_dir, exist_ok=True)
     model_tb = tf.keras.callbacks.TensorBoard(log_dir=log_dir)
-    model_mckp = tf.keras.callbacks.ModelCheckpoint(log_dir + 'models/best-model.hdf5',
-                                                    monitor='val_categorical_accuracy',  # TODO: mAP
+    model_mckp = tf.keras.callbacks.ModelCheckpoint(model_dir + '/best-model.h5',
+                                                    monitor='val_loss',  # TODO: mAP
                                                     save_best_only=True,
-                                                    mode='max')
+                                                    mode='min')
     model_ep = tf.keras.callbacks.EarlyStopping(patience=10, verbose=1)
     mdoel_rlr = tf.keras.callbacks.ReduceLROnPlateau(verbose=1)
 
     # Freeze layers
+    darknet = model.get_layer('Yolo_DarkNet')
     trainable_model(darknet, trainable=False)
 
     # 1) Training model step1
     print("Start teraining Step1")
     training_model(model,
                    callbacks=[model_tb, model_mckp],
+                   classes=classes,
                    step=1)
 
     # Unfreeze layers
-    darknet = model.get_layer('Yolo_DarkNet')
     trainable_model(darknet, trainable=True)
 
     # 2) Training model step2
     print("Start teraining Step2")
     training_model(model,
                    callbacks=[model_tb, model_mckp],
+                   classes=classes,
                    step=2)
 
 

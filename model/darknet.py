@@ -1,12 +1,17 @@
 import tensorflow as tf
 from tensorflow.keras import layers
 
+layer_count = 1
 
-def darknetconv2d(x, filters, kernel_size, strides=(1, 1)):
+
+def darknetconv2d(x, filters, kernel_size, strides=(1, 1), num_classes=80):
+    global layer_count
     padding = 'valid' if strides == (2, 2) else 'same'
     x = layers.Conv2D(filters, kernel_size, strides,
                       padding=padding,
-                      kernel_regularizer=tf.keras.regularizers.l2(5e-4))(x)
+                      kernel_regularizer=tf.keras.regularizers.l2(5e-4),
+                      name='conv2d_last_layer{}_{}'.format(layer_count, num_classes))(x)
+    layer_count += 1
     return x
 
 

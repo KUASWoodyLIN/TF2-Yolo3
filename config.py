@@ -15,14 +15,31 @@ size_h = 416
 size_w = 416
 
 # Training setting
-step1_batch_size = 30
-step1_learning_rate = 1e-3
-step1_epochs = 50
-step2_batch_size = 8
-step2_learning_rate = 1e-4
-step2_epochs = 100
+tiny = False
+if tiny:
+    step1_batch_size = 32
+    step1_learning_rate = 1e-3
+    step1_start_epochs = 0
+    step1_end_epochs = 50
+    step2_batch_size = 14
+    step2_learning_rate = 1e-4
+    step2_start_epochs = 50
+    step2_end_epochs = 100
+else:
+    step1_batch_size = 30
+    step1_learning_rate = 1e-3
+    step1_start_epochs = 0
+    step1_end_epochs = 50
+    step2_batch_size = 8
+    step2_learning_rate = 1e-4
+    step2_start_epochs = 50
+    step2_end_epochs = 100
 
 
 # Pre-Train weights
 yolo_weights = 'model_data/yolo_weights.h5'
 yolo_tiny_weights = 'model_data/yolo_tiny_weights.h5'
+
+# Our Yolo weights
+yolo_voc_weights = 'logs-yolo/models/best-model.h5'
+yolo_coco_weights = 'logs-yolo/models/best-model.h5'
