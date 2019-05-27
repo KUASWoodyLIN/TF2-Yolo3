@@ -24,7 +24,7 @@ class YoloOutputBoxLayer(tf.keras.layers.Layer):
 
         # box_xy: (batch, grid_h, grid_w, anchors, (x, y))
         # each box (x, y)
-        box_xy = (box_xy + tf.cast(grid, box_xy.dtype)) / tf.cast((self.grid_w, self.grid_h), box_xy.dtype)
+        box_xy = (box_xy + tf.cast(grid, tf.float32)) / tf.cast((self.grid_w, self.grid_h), tf.float32)
         box_wh = tf.exp(box_wh) * self.anchors
 
         box_x1y1 = box_xy - box_wh / 2

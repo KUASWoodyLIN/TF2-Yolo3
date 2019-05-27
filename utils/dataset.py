@@ -18,7 +18,7 @@ def parse_aug_fn(dataset, input_size=(416, 416)):
     x, bbox = resize(x, bbox, input_size)
 
     # 觸發顏色轉換機率50%
-    x = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: color(x), lambda: x)
+    x = tf.cond(tf.random.uniform([], 0, 1) > 0.75, lambda: color(x), lambda: x)
     # 觸發影像翻轉機率50%
     x, bbox = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: flip(x, bbox), lambda: (x, bbox))
     # 觸發影像縮放機率50%
@@ -174,7 +174,7 @@ def flip(x, bboxes):
     return x, [y1, x1, y2, x2]
 
 
-def zoom(x, bboxes, label, scale_min=0.6, scale_max=1.4):
+def zoom(x, bboxes, label, scale_min=0.6, scale_max=1.6):
     """
         Zoom Image(影像縮放)
 
@@ -287,12 +287,12 @@ if __name__ == "__main__":
                 y2 = tf.cast(box[3], tf.int16).numpy()
                 label = classes_list[box[4]]
                 print(label)
-                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 1, 0), 2)
                 cv2.putText(img,
                             label,
                             (x1, y1 - 3),
                             cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (0, 255, 0), 2)
+                            1, (0, 1, 0), 2)
 
             i = count // 4
             j = count % 4

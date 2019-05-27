@@ -83,9 +83,8 @@ def yolov3(input_size, anchors=yolo_anchors, num_classes=80, iou_threshold=0.5, 
 if __name__ == "__main__":
     from tensorflow.python.keras.callbacks import TensorBoard
     import os
-    os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-    inputs_ = Input((416, 416, 3))
-    model = yolov3(inputs_)
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    model = yolov3((416, 416, 3), training=True)
     model.summary(line_length=250)
     model_tb = TensorBoard('../logs-2')
     model_tb.set_model(model)
