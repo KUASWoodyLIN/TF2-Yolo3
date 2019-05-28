@@ -98,15 +98,15 @@ def main():
                    classes=classes,
                    step=1)
 
-    # Unfreeze layers
-    trainable_model(darknet, trainable=True)
-
-    # 2) Training model step2
-    print("Start teraining Step2")
-    training_model(model,
-                   callbacks=[model_tb, model_mckp, mdoel_rlr, model_ep],
-                   classes=classes,
-                   step=2)
+    # # Unfreeze layers
+    # trainable_model(darknet, trainable=True)
+    #
+    # # 2) Training model step2
+    # print("Start teraining Step2")
+    # training_model(model,
+    #                callbacks=[model_tb, model_mckp, mdoel_rlr, model_ep],
+    #                classes=classes,
+    #                step=2)
 
 
 if __name__ == '__main__':

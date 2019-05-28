@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tensorflow_addons as tfa
 import tensorflow_datasets as tfds
 import numpy as np
 
@@ -23,6 +24,8 @@ def parse_aug_fn(dataset, input_size=(416, 416)):
     x, bbox = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: flip(x, bbox), lambda: (x, bbox))
     # 觸發影像縮放機率50%
     x, bbox, label = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: zoom(x, bbox, label), lambda: (x, bbox, label))
+    # 觸發影像旋轉機率50%
+    x, bbox, label = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: rotate(x, bbox, label), lambda: (x, bbox, label))
 
     # 將[x1, y1, x2, y2, classes]合為shape=(x, 5)的Tensor
     y = tf.stack([bbox[1], bbox[0], bbox[3], bbox[2], label], axis=-1)
@@ -234,6 +237,68 @@ def zoom(x, bboxes, label, scale_min=0.6, scale_max=1.6):
     y2 = y2[bboxes_filter]
     x2 = x2[bboxes_filter]
     label = label[bboxes_filter]
+    output = tf.ensure_shape(output, x.shape)
+    return output, [y1, x1, y2, x2], label
+
+
+def rotate(img, bboxes, label, angle=(-45, 45)):
+    h, w, c = img.shape
+    cx, cy = w // 2, h // 2
+    angle = tf.random.uniform([], angle[0], angle[1], tf.float32)
+    # angle = random.uniform(*angle)
+    # angle = np.random.uniform(*angle)
+
+    theta = np.pi * angle / 180
+    output = tfa.image.rotate(img, theta)
+
+    # convert (ymin, xmin, ymax, xmax) to corners
+    width = bboxes[3] - bboxes[1]
+    height = bboxes[2] - bboxes[0]
+    x1 = bboxes[1]
+    y1 = bboxes[0]
+    x2 = x1 + width
+    y2 = y1
+    x3 = x1
+    y3 = y1 + height
+    x4 = bboxes[3]
+    y4 = bboxes[2]
+    corners = tf.stack((x1, y1, x2, y2, x3, y3, x4, y4), axis=-1)
+
+    # calculate the rotate bboxes
+    corners = tf.reshape(corners, (-1, 2))
+    corners = tf.concat((corners, tf.ones((tf.shape(corners)[0], 1), dtype=corners.dtype)), axis=-1)
+
+    alpha = tf.cos(theta)
+    beta = tf.sin(theta)
+    M = tf.reshape(tf.stack([alpha, beta, (1 - alpha) * cx - beta * cy, -beta, alpha, beta * cx + (1 - alpha) * cy]),
+                   (2, 3))
+    # M = cv2.getRotationMatrix2D((cx, cy), tf.cast(angle, np.float), 1.0)# .astype(np.float32)
+    corners = tf.matmul(corners, M, transpose_b=True)
+    corners = tf.reshape(corners, (-1, 8))
+
+    # convert corners to (xmin, ymin, xmax, ymax)
+    x_ = corners[:, ::2]
+    y_ = corners[:, 1::2]
+    x1 = tf.reduce_min(x_, axis=-1)
+    y1 = tf.reduce_min(y_, axis=-1)
+    x2 = tf.reduce_max(x_, axis=-1)
+    y2 = tf.reduce_max(y_, axis=-1)
+
+    # 如果座標超出範圍將其限制在邊界上
+    y1 = tf.where(y1 < 0, tf.zeros_like(y1), y1)
+    x1 = tf.where(x1 < 0, tf.zeros_like(x1), x1)
+    y2 = tf.where(y2 > h, h * tf.ones_like(y2), y2)
+    x2 = tf.where(x2 > w, w * tf.ones_like(x2), x2)
+
+    # 找出不存在影像上的bounding box並剔除
+    box_w = x2 - x1
+    box_h = y2 - y1
+    bboxes_filter = tf.logical_and(box_w > 1, box_h > 1)
+    y1 = y1[bboxes_filter]
+    x1 = x1[bboxes_filter]
+    y2 = y2[bboxes_filter]
+    x2 = x2[bboxes_filter]
+    label = label[bboxes_filter]
     return output, [y1, x1, y2, x2], label
 
 
@@ -255,7 +320,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import cv2
     import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
     yolo_anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),
