@@ -103,7 +103,7 @@ def transform_targets_for_output(y_true, grid_size, anchor_idxs):
     return tf.tensor_scatter_nd_update(y_true_out, indexes.stack(), updates.stack())
 
 
-def transform_targets(x_train, y_train, anchors, anchor_masks):
+def transform_targets(x_train, y_train, anchors, anchor_masks, grid_size=13):
     """
             transform y_label to training target label,
         (None, 100, [y1, x1, y2, x2, class]) -> (N, grid_size, grid_size, anchor, [x, y, w, h, obj, class])
@@ -114,7 +114,6 @@ def transform_targets(x_train, y_train, anchors, anchor_masks):
         :return:
     """
     y_outs = []
-    grid_size = 13
 
     # calculate anchor index for true boxes
     anchors = tf.cast(anchors, tf.float32)
@@ -371,10 +370,10 @@ if __name__ == "__main__":
         # 取得訓練數據，並順便讀取data的資訊
         train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)
         train_data = train_data.shuffle(1000)  # 打散資料集
-        train_data = train_data.map(lambda dataset: parse_aug_fn(dataset),
+        train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (608, 608)),
                                     num_parallel_calls=AUTOTUNE)
         train_data = train_data.batch(32)
-        train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks),
+        train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks, 19),
                                     num_parallel_calls=AUTOTUNE)
         train_data = train_data.prefetch(buffer_size=AUTOTUNE)
 
@@ -382,6 +381,6 @@ if __name__ == "__main__":
             print(True)
 
     # Augmentation test
-    test_augmentation()
+    # test_augmentation()
     # Targets transform test
-    # test_label_transform()
+    test_label_transform()

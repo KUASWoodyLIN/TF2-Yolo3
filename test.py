@@ -69,8 +69,8 @@ def main():
 
     # Load weights
     print('weights loaded ', config.yolo_voc_weights)
-    model.load_weights(config.yolo_voc_weights, by_name=True)
-    # model.load_weights('logs-yolo-1/models/best-model-ep069.h5')
+    # model.load_weights(config.yolo_voc_weights, by_name=True)
+    model.load_weights('logs-yolo-add-rotate/models/best-model-ep087.h5')
 
     test_and_show_result(model)
 

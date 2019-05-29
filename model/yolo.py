@@ -84,7 +84,7 @@ if __name__ == "__main__":
     from tensorflow.python.keras.callbacks import TensorBoard
     import os
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-    model = yolov3((416, 416, 3), training=True)
+    model = yolov3((None, None, 3), training=True)
     model.summary(line_length=250)
     model_tb = TensorBoard('../logs-2')
     model_tb.set_model(model)

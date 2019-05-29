@@ -6,7 +6,6 @@ from model import yolov3
 from utils import parse_aug_fn, parse_fn, transform_targets, trainable_model
 
 # Anchors setting
-anchors = config.yolo_anchors
 anchor_masks = config.yolo_anchor_masks
 
 
@@ -26,6 +25,7 @@ def training_model(model, callbacks, classes=80, step=1):
         learning_rate = config.step2_learning_rate
         start_epochs = config.step2_start_epochs
         end_epochs = config.step2_end_epochs
+    anchors = config.yolo_anchors / 416
 
     # Training dataset setting
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式

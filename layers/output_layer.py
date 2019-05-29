@@ -11,5 +11,8 @@ class YoloOutputLayer(tf.keras.layers.Layer):
         self.input_h, self.input_w = input_shape[1:3]
 
     def call(self, x, **kwargs):
-        x = tf.reshape(x, (-1, self.input_h, self.input_w, self.num_anchors, self.num_classes + 5))
+        if self.input_h is None or self.input_w is None:
+            x = tf.reshape(x, (-1, tf.shape(x)[1], tf.shape(x)[2], self.num_anchors, self.num_classes + 5))
+        else:
+            x = tf.reshape(x, (-1, self.input_h, self.input_w, self.num_anchors, self.num_classes + 5))
         return x
