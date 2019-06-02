@@ -29,7 +29,9 @@ def yolo_loss(y_true, y_pred, anchors, classes=80, ignore_thresh=0.5):
     """
     # 1. transform all pred outputs
     # y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))
-    pred_box, pred_obj, pred_class, pred_xywh = yolo_boxes(y_pred, anchors, classes)
+    pred_box, pred_obj, pred_class, pred_xywh = tf.split(y_pred, (4, 1, classes, 4), axis=-1)
+
+    # pred_box, pred_obj, pred_class, pred_xywh = yolo_boxes(y_pred, anchors, classes)
     pred_xy = pred_xywh[..., 0:2]
     pred_wh = pred_xywh[..., 2:4]
 
@@ -75,39 +77,39 @@ def yolo_loss(y_true, y_pred, anchors, classes=80, ignore_thresh=0.5):
 
     return xy_loss + wh_loss + confidence_loss + class_loss
 
-
-def yolo_boxes(pred, anchors, classes):
-    """
-        :param pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))
-        :param anchors: (3, (w, h))
-        :param classes: number of dataset classes
-        :return:
-                bbox: (batch, grid_h, grid_w, anchors, (x1, y1, x2, y2))
-                box_confidence: (batch, grid_h, grid_w, anchors, 1)
-                box_class_probs: (batch, grid_h, grid_w, anchors, classes)
-                pred_box: (batch, grid_h, grid_w, anchors, (tx, ty, tw, th)) for Calculated loss function
-        """
-    grid_h, grid_w = tf.shape(pred)[1], tf.shape(pred)[2]
-    box_xy, box_wh, box_confidence, box_class_probs = tf.split(pred, (2, 2, 1, classes), axis=-1)
-
-    box_xy = tf.sigmoid(box_xy)  # scale to 0~1
-    box_confidence = tf.sigmoid(box_confidence)  # scale to 0~1
-    box_class_probs = tf.sigmoid(box_class_probs)  # scale to 0~1
-    pred_box = tf.concat((box_xy, box_wh), axis=-1)  # original x,y,w,h for loss function
-
-    grid = tf.meshgrid(tf.range(grid_w), tf.range(grid_h))
-    grid = tf.stack(grid, axis=-1)  # (gx, gy, 2)
-    grid = tf.expand_dims(grid, axis=2)  # (gx, gy, 1, 2)
-
-    # box_xy: (batch, grid_h, grid_w, anchors, (x, y))
-    # each box (x, y)
-    box_xy = (box_xy + tf.cast(grid, box_xy.dtype)) / tf.cast((grid_w, grid_h), box_xy.dtype)
-    box_wh = tf.exp(box_wh) * anchors
-
-    box_x1y1 = box_xy - box_wh / 2
-    box_x2y2 = box_xy + box_wh / 2
-    bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
-    return bbox, box_confidence, box_class_probs, pred_box
+#
+# def yolo_boxes(pred, anchors, classes):
+#     """
+#         :param pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))
+#         :param anchors: (3, (w, h))
+#         :param classes: number of dataset classes
+#         :return:
+#                 bbox: (batch, grid_h, grid_w, anchors, (x1, y1, x2, y2))
+#                 box_confidence: (batch, grid_h, grid_w, anchors, 1)
+#                 box_class_probs: (batch, grid_h, grid_w, anchors, classes)
+#                 pred_box: (batch, grid_h, grid_w, anchors, (tx, ty, tw, th)) for Calculated loss function
+#         """
+#     grid_h, grid_w = tf.shape(pred)[1], tf.shape(pred)[2]
+#     box_xy, box_wh, box_confidence, box_class_probs = tf.split(pred, (2, 2, 1, classes), axis=-1)
+#
+#     box_xy = tf.sigmoid(box_xy)  # scale to 0~1
+#     box_confidence = tf.sigmoid(box_confidence)  # scale to 0~1
+#     box_class_probs = tf.sigmoid(box_class_probs)  # scale to 0~1
+#     pred_box = tf.concat((box_xy, box_wh), axis=-1)  # original x,y,w,h for loss function
+#
+#     grid = tf.meshgrid(tf.range(grid_w), tf.range(grid_h))
+#     grid = tf.stack(grid, axis=-1)  # (gx, gy, 2)
+#     grid = tf.expand_dims(grid, axis=2)  # (gx, gy, 1, 2)
+#
+#     # box_xy: (batch, grid_h, grid_w, anchors, (x, y))
+#     # each box (x, y)
+#     box_xy = (box_xy + tf.cast(grid, box_xy.dtype)) / tf.cast((grid_w, grid_h), box_xy.dtype)
+#     box_wh = tf.exp(box_wh) * anchors
+#
+#     box_x1y1 = box_xy - box_wh / 2
+#     box_x2y2 = box_xy + box_wh / 2
+#     bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
+#     return bbox, box_confidence, box_class_probs, pred_box
 
 
 def broadcast_iou(pred_box, true_box):
