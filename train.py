@@ -33,7 +33,6 @@ def training_model(model, callbacks, classes=80, step=1):
     train_data = tfds.load("voc2007", split=combined_split)    # 取得訓練數據
     train_data = train_data.shuffle(1000)  # 打散資料集
     train_data = train_data.map(lambda dataset: parse_aug_fn(dataset), num_parallel_calls=AUTOTUNE)
-    # train_data = train_data.map(lambda dataset: parse_fn(dataset), num_parallel_calls=AUTOTUNE)
     train_data = train_data.batch(batch_size)
     train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks),
                                 num_parallel_calls=AUTOTUNE)
@@ -48,7 +47,9 @@ def training_model(model, callbacks, classes=80, step=1):
 
     # Training
     optimizer = tf.keras.optimizers.Adam(lr=learning_rate)
-    model.compile(optimizer=optimizer, loss=[YoloLoss(anchors[mask], classes=classes) for mask in anchor_masks], run_eagerly=False)
+    model.compile(optimizer=optimizer,
+                  loss=[YoloLoss(anchors[mask], classes=classes) for mask in anchor_masks],
+                  run_eagerly=False)
     model.fit(train_data,
               epochs=end_epochs,
               callbacks=callbacks,
@@ -69,11 +70,11 @@ def main():
     model.load_weights(config.yolo_weights, by_name=True)
 
     # Callbacks function
-    log_dir = 'logs-yolo'
+    log_dir = 'logs_yolo'
     model_dir = log_dir + '/models'
     os.makedirs(model_dir, exist_ok=True)
     model_tb = tf.keras.callbacks.TensorBoard(log_dir=log_dir)
-    model_mckp = tf.keras.callbacks.ModelCheckpoint(model_dir + '/best-model-ep{epoch:03d}.h5',
+    model_mckp = tf.keras.callbacks.ModelCheckpoint(model_dir + '/best_{epoch:03d}.h5',
                                                     monitor='val_loss',  # TODO: mAP
                                                     save_best_only=True,
                                                     mode='min')
@@ -98,15 +99,15 @@ def main():
                    classes=classes,
                    step=1)
 
-    # # Unfreeze layers
-    # trainable_model(darknet, trainable=True)
-    #
-    # # 2) Training model step2
-    # print("Start teraining Step2")
-    # training_model(model,
-    #                callbacks=[model_tb, model_mckp, mdoel_rlr, model_ep],
-    #                classes=classes,
-    #                step=2)
+    # Unfreeze layers
+    trainable_model(darknet, trainable=True)
+
+    # 2) Training model step2
+    print("Start teraining Step2")
+    training_model(model,
+                   callbacks=[model_tb, model_mckp, mdoel_rlr, model_ep],
+                   classes=classes,
+                   step=2)
 
 
 if __name__ == '__main__':

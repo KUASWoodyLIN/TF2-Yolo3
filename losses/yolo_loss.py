@@ -44,7 +44,6 @@ def yolo_loss(y_true, y_pred, anchors, classes=80, ignore_thresh=0.5):
     box_loss_scale = 2 - true_wh[..., 0] * true_wh[..., 1]
 
     # 3. inverting the pred box equations
-    # grid_h, grid_w = y_true.get_shape()[1:3]
     grid_h, grid_w = tf.shape(y_true)[1], tf.shape(y_true)[2]
     grid = tf.meshgrid(tf.range(grid_w), tf.range(grid_h))
     grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
@@ -78,7 +77,16 @@ def yolo_loss(y_true, y_pred, anchors, classes=80, ignore_thresh=0.5):
 
 
 def yolo_boxes(pred, anchors, classes):
-    # pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))
+    """
+        :param pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))
+        :param anchors: (3, (w, h))
+        :param classes: number of dataset classes
+        :return:
+                bbox: (batch, grid_h, grid_w, anchors, (x1, y1, x2, y2))
+                box_confidence: (batch, grid_h, grid_w, anchors, 1)
+                box_class_probs: (batch, grid_h, grid_w, anchors, classes)
+                pred_box: (batch, grid_h, grid_w, anchors, (tx, ty, tw, th)) for Calculated loss function
+        """
     grid_h, grid_w = tf.shape(pred)[1], tf.shape(pred)[2]
     box_xy, box_wh, box_confidence, box_class_probs = tf.split(pred, (2, 2, 1, classes), axis=-1)
 
