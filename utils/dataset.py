@@ -319,7 +319,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import cv2
     import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
     yolo_anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),
@@ -333,7 +333,7 @@ if __name__ == "__main__":
         # 取得訓練數據，並順便讀取data的資訊
         train_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
         train_data = train_data.shuffle(1000)  # 打散資料集
-        train_data = train_data.map(lambda dataset: parse_aug_fn(dataset),
+        train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (608, 608)),
                                     num_parallel_calls=AUTOTUNE)
         classes_list = info.features['labels'].names
 
@@ -380,6 +380,35 @@ if __name__ == "__main__":
         for x_batch, y_batch in train_data.take(500):
             print(True)
 
+    # def test():
+    #     import os
+    #     import psutil
+    #     import gc
+    #     memory_used = []
+    #     for i in range(30):
+    #         # 取得訓練數據，並順便讀取data的資訊
+    #         train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)
+    #         train_data = train_data.shuffle(1000)  # 打散資料集
+    #         train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (608, 608)),
+    #                                     num_parallel_calls=AUTOTUNE)
+    #         train_data = train_data.batch(32)
+    #         # train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks, 19),
+    #         #                             num_parallel_calls=AUTOTUNE)
+    #         train_data = train_data.prefetch(buffer_size=AUTOTUNE)
+    #
+    #         for x_batch, y_batch in train_data.take(5):
+    #             print(i, True)
+    #         memory_used.append(psutil.virtual_memory().used / 2 ** 30)
+    #         gc.collect()
+    #
+    #     plt.plot(memory_used)
+    #     plt.title('Evolution of memory')
+    #     plt.xlabel('iteration')
+    #     plt.ylabel('memory used (GB)')
+    #     plt.show()
+    #
+    #
+    # test()
     # Augmentation test
     # test_augmentation()
     # Targets transform test

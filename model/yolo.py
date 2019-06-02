@@ -72,10 +72,10 @@ def yolov3(input_size, anchors=yolo_anchors, num_classes=80, iou_threshold=0.5, 
     x, y3 = make_last_layers(x, 128, num_anchors, num_classes)
     if training:
         return Model(inputs, (y1, y2, y3), name='Yolo-V3')
-
-    y1 = YoloOutputBoxLayer(anchors[6:], num_classes)(y1)
-    y2 = YoloOutputBoxLayer(anchors[3:6], num_classes)(y2)
-    y3 = YoloOutputBoxLayer(anchors[0:3], num_classes)(y3)
+    h, w, _ = input_size
+    y1 = YoloOutputBoxLayer(anchors[6:]/(h, w), num_classes)(y1)
+    y2 = YoloOutputBoxLayer(anchors[3:6]/(h, w), num_classes)(y2)
+    y3 = YoloOutputBoxLayer(anchors[0:3]/(h, w), num_classes)(y3)
     outputs = NMSLayer(num_classes, iou_threshold, score_threshold)([y1, y2, y3])
     return Model(inputs, outputs, name='Yolo-V3')
 

@@ -94,7 +94,7 @@ def main():
     # 1) Training model step1
     print("Start teraining Step1")
     training_model(model,
-                   callbacks=[model_tb, model_mckp, mdoel_rlr],
+                   callbacks=[model_tb, model_mckp, mdoel_rlr, model_ep],
                    classes=classes,
                    step=1)
 
