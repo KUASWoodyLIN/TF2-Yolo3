@@ -7,8 +7,8 @@ import numpy as np
 # @tf.function
 def parse_aug_fn(dataset, input_size=(416, 416)):
     """
-    Image Augmentation function
-    """
+        Image Augmentation function
+        """
     ih, iw = input_size
     # (None, None, 3)
     x = tf.cast(dataset['image'], tf.float32) / 255.
@@ -73,9 +73,16 @@ def parse_fn_test(dataset, input_size=(416, 416)):
 
 @tf.function
 def transform_targets_for_output(y_true, grid_size, anchor_idxs):
-    # y_true: (N, boxes, (x1, y1, x2, y2, class, best_anchor))
+    """
+        產生一個輸出層的訓練標籤
+        (batch, 100, [x1, y1, x2, y2, class, best_anchor]) -> (batch, grid, grid, anchor, [x, y, w, h, obj, class])
+        :param y_true: shape: (N, boxes, (x1, y1, x2, y2, class, best_anchor))
+        :param grid_size: grid cell 的大小
+        :param anchor_idxs: 該輸出層anchor boxes的索引值(每層有3個anchor boxes所以有三個索引值)
+        :return:(batch, grid, grid, anchor, [x, y, w, h, obj, class])
+        """
     batch = tf.shape(y_true)[0]
-    # y_true_out: (N, grid, grid, anchors, [x, y, w, h, obj, class])
+    # 創建訓練標籤 y_true_out: (N, grid, grid, anchors, [x, y, w, h, obj, class])
     y_true_out = tf.zeros((batch, grid_size, grid_size, tf.shape(anchor_idxs)[0], 6))
 
     anchor_idxs = tf.cast(anchor_idxs, tf.int32)
@@ -85,34 +92,45 @@ def transform_targets_for_output(y_true, grid_size, anchor_idxs):
     idx = 0
     for i in tf.range(batch):
         for j in tf.range(tf.shape(y_true)[1]):
+            # 如果w=0代表沒有物件
             if tf.equal(y_true[i][j][2], 0):
                 continue
+            # 該層使用的anchor boxes是否是與真實物件框IoU最高的anchor box
             anchor_eq = tf.equal(anchor_idxs, tf.cast(y_true[i][j][5], tf.int32))
-
             if tf.reduce_any(anchor_eq):
+                # box: (x1, y1, x2, y2)
                 box = y_true[i][j][0:4]
+                # box中心點
                 box_xy = (y_true[i][j][0:2] + y_true[i][j][2:4]) / 2
-
+                # 找出最高IoU的anchor box索引值
                 anchor_idx = tf.cast(tf.where(anchor_eq), tf.int32)
+                # 計算該anchor box位於哪個grid cell中
                 grid_xy = tf.cast(box_xy // (1/grid_size), tf.int32)
 
-                # grid[y][x][anchor] = (tx, ty, bw, bh, obj, class)
+                # 紀錄要填入y_true_out的索引值
                 indexes = indexes.write(idx, [i, grid_xy[1], grid_xy[0], anchor_idx[0][0]])
+                # 紀錄要填入y_true_out的數值(x, y, w, h, 1(有物件), class)
                 updates = updates.write(idx, [box[0], box[1], box[2], box[3], 1, y_true[i][j][4]])
                 idx += 1
+    # 將剛紀錄的y_true數值跟新到y_true_out中
     return tf.tensor_scatter_nd_update(y_true_out, indexes.stack(), updates.stack())
 
 
 def transform_targets(x_train, y_train, anchors, anchor_masks, grid_size=13):
     """
-            transform y_label to training target label,
-        (None, 100, [y1, x1, y2, x2, class]) -> (N, grid_size, grid_size, anchor, [x, y, w, h, obj, class])
-        :param x_train: (None, 416, 416, 3)
-        :param y_train: (None, 100, [y1, x1, y2, x2, class])
-        :param anchors: yolo anchors setting
-        :param anchor_masks: yolo anchors mask
+        transform y_label to training target label,
+        (batch, 100, [y1, x1, y2, x2, class])→(batch, grid, grid, anchor, [x, y, w, h, obj, class])
+        :param x_train: shape: (None, 416, 416, 3)
+        :param y_train: shape: (None, 100, [x1, y1, x2, y2, class])
+        :param anchors: 9個預設的anchors box，shape: (9,2)
+        :param anchor_masks: anchors box的遮罩
         :return:
-    """
+            x_train: 訓練影像，shape: (batch, img_h, img_w, 3)
+            y_outs: 返回三個不同層輸出的訓練資料
+                    ((batch, grid, grid, 3, [x, y, w, h, obj, class, best_anchor]),
+                     (batch, grid, grid, 3, [x, y, w, h, obj, class, best_anchor]),
+                     (batch, grid, grid, 3, [x, y, w, h, obj, class, best_anchor]))
+        """
     y_outs = []
 
     # calculate anchor index for true boxes
@@ -215,7 +233,6 @@ def zoom(x, bboxes, label, scale_min=0.6, scale_max=1.6):
     output, dx, dy = tf.case([(tf.logical_or(tf.less(nh - h, 0), tf.less(nw - w, 0)), scale_less_then_one),
                               (tf.logical_or(tf.greater(nh - h, 0), tf.greater(nw - w, 0)), scale_greater_then_one)],
                              default=scale_equal_zero)
-    # [(tf.less(x, y), f1)]
 
     # 重新調整bounding box位置
     y1 = bboxes[0] * scale + tf.cast(dy, dtype=tf.float32)

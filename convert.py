@@ -12,7 +12,7 @@ def main():
     input_size = (416, 416, 3)
     if tiny_model:
         yolo = yolov3_tiny(input_size)
-        yolo_darknet_weights = 'model_data/yolov3-tiny.weights'
+        yolo_darknet_weights = 'model_data/yolov3_tiny.weights'
     else:
         yolo = yolov3(input_size)
         yolo_darknet_weights = 'model_data/yolov3.weights'

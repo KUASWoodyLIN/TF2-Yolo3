@@ -6,9 +6,7 @@ from tensorflow.python.keras import layers, Model, Input
 
 
 yolo_anchors = config.yolo_anchors
-yolo_anchor_masks = config.yolo_anchor_masks
 yolo_tiny_anchors = config.yolo_tiny_anchors
-yolo_tiny_anchor_masks = config.yolo_tiny_anchor_masks
 
 
 def make_last_layers(x, num_filters, num_anchors, num_classes):
@@ -25,7 +23,9 @@ def make_last_layers(x, num_filters, num_anchors, num_classes):
     return x, y
 
 
-def yolov3_tiny(inputs, num_anchors, num_classes):
+def yolov3_tiny(input_size, anchors=yolo_tiny_anchors, num_classes=80, iou_threshold=0.5, score_threshold=0.5, training=False):
+    num_anchors = len(anchors) // 3
+    inputs = Input(input_size)
     x1 = darknetconv2d_bn_leaky(inputs, 16, (3, 3))
     x1 = layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='same')(x1)
     x1 = darknetconv2d_bn_leaky(x1, 32, (3, 3))
@@ -51,7 +51,13 @@ def yolov3_tiny(inputs, num_anchors, num_classes):
     y2 = layers.Concatenate()([x2, x1])
     y2 = darknetconv2d_bn_leaky(y2, 256, (3, 3)),
     y2 = darknetconv2d(y2, num_anchors * (num_classes + 5), (1, 1))
-    return Model(inputs, [y1, y2])
+    if training:
+        return Model(inputs, (y1, y2), name='Yolo-V3')
+    h, w, _ = input_size
+    y1 = YoloOutputBoxLayer(anchors[3:] / (h, w), num_classes)(y1)
+    y2 = YoloOutputBoxLayer(anchors[:3] / (h, w), num_classes)(y2)
+    outputs = NMSLayer(num_classes, iou_threshold, score_threshold)([y1, y2])
+    return Model(inputs, outputs, name='Yolo-V3')
 
 
 def yolov3(input_size, anchors=yolo_anchors, num_classes=80, iou_threshold=0.5, score_threshold=0.5, training=False):
@@ -72,10 +78,10 @@ def yolov3(input_size, anchors=yolo_anchors, num_classes=80, iou_threshold=0.5, 
     x, y3 = make_last_layers(x, 128, num_anchors, num_classes)
     if training:
         return Model(inputs, (y1, y2, y3), name='Yolo-V3')
-
-    y1 = YoloOutputBoxLayer(anchors[6:], num_classes)(y1)
-    y2 = YoloOutputBoxLayer(anchors[3:6], num_classes)(y2)
-    y3 = YoloOutputBoxLayer(anchors[0:3], num_classes)(y3)
+    h, w, _ = input_size
+    y1 = YoloOutputBoxLayer(anchors[6:] / (h, w), num_classes)(y1)
+    y2 = YoloOutputBoxLayer(anchors[3:6] / (h, w), num_classes)(y2)
+    y3 = YoloOutputBoxLayer(anchors[0:3] / (h, w), num_classes)(y3)
     outputs = NMSLayer(num_classes, iou_threshold, score_threshold)([y1, y2, y3])
     return Model(inputs, outputs, name='Yolo-V3')
 

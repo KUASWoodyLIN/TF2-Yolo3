@@ -40,5 +40,5 @@ yolo_weights = 'model_data/yolo_weights.h5'
 yolo_tiny_weights = 'model_data/yolo_tiny_weights.h5'
 
 # Our Yolo weights
-yolo_voc_weights = 'logs-yolo/models/best-model-ep011.h5'
-yolo_coco_weights = 'logs-yolo/models/best-model.h5'
+yolo_voc_weights = 'logs_yolo/models/best_011.h5'
+yolo_coco_weights = 'logs_yolo/models/best_001.h5'
