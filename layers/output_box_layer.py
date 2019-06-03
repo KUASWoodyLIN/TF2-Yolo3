@@ -40,5 +40,5 @@ class YoloOutputBoxLayer(tf.keras.layers.Layer):
         box_x2y2 = box_xy + box_wh / 2
         bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
         if self.training:
-            return tf.concat([bbox, box_confidence, box_class_probs, pred_box])
+            return tf.concat([bbox, box_confidence, box_class_probs, pred_box], axis=-1)
         return bbox, box_confidence, box_class_probs

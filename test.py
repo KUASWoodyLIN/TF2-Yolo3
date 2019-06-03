@@ -12,10 +12,14 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 # Load dataset
-test_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
+# test_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
+
+test_data, info = tfds.load("coco2014", split=tfds.Split.TEST, with_info=True,
+                            data_dir='/home/share/dataset/tensorflow-datasets')
+
 # Dataset info
-classes_list = info.features['labels'].names
-num_classes = info.features['labels'].num_classes
+classes_list = info.features['objects']['label'].names
+num_classes = info.features['objects']['label'].num_classes
 
 
 def test_and_show_result(model, test_number=10):
@@ -38,19 +42,19 @@ def test_and_show_result(model, test_number=10):
                         cv2.FONT_HERSHEY_SIMPLEX,
                         1, (255, 0, 0), 2)
 
-        # draw ground truth bounding box
-        for box in bboxes:
-            x1 = tf.cast(box[0], tf.int16).numpy()
-            y1 = tf.cast(box[1], tf.int16).numpy()
-            x2 = tf.cast(box[2], tf.int16).numpy()
-            y2 = tf.cast(box[3], tf.int16).numpy()
-            label = classes_list[box[4]]
-            cv2.rectangle(org_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(org_img,
-                        label,
-                        (x1, y1 - 3),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (0, 255, 0), 2)
+        # # draw ground truth bounding box
+        # for box in bboxes:
+        #     x1 = tf.cast(box[0], tf.int16).numpy()
+        #     y1 = tf.cast(box[1], tf.int16).numpy()
+        #     x2 = tf.cast(box[2], tf.int16).numpy()
+        #     y2 = tf.cast(box[3], tf.int16).numpy()
+        #     label = classes_list[box[4]]
+        #     cv2.rectangle(org_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        #     cv2.putText(org_img,
+        #                 label,
+        #                 (x1, y1 - 3),
+        #                 cv2.FONT_HERSHEY_SIMPLEX,
+        #                 1, (0, 255, 0), 2)
         plt.figure()
         plt.imshow(org_img)
     plt.show()
@@ -63,15 +67,16 @@ def main():
     model.summary()
 
     # Freeze layers
-    darknet = model.get_layer('Yolo_DarkNet')
-    trainable_model(darknet, trainable=False)
+    # darknet = model.get_layer('Yolo_DarkNet')
+    # trainable_model(darknet, trainable=False)
 
     # Load weights
     print('weights loaded ', config.yolo_voc_weights)
     # model.load_weights(config.yolo_voc_weights, by_name=True)
-    model.load_weights('logs-yolo-add-rotate/models/best-model-ep087.h5')
+    # model.load_weights('logs_yolo/models/best_066.h5')
+    model.load_weights('model_data/yolo_weights.h5')
 
-    test_and_show_result(model, test_number=1)
+    test_and_show_result(model, test_number=10)
 
 
 if __name__ == '__main__':

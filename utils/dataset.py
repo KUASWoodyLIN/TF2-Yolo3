@@ -7,11 +7,11 @@ import numpy as np
 # @tf.function
 def parse_aug_fn(dataset, input_size=(416, 416)):
     """
-        Image Augmentation function
-        """
+    Image Augmentation function
+    """
     ih, iw = input_size
     # (None, None, 3)
-    x = tf.cast(dataset['image'], tf.float32) / 255.
+    x = tf.cast(dataset['image'], tf.float32)
     # (y1, x1, y2, x2, class)
     bbox = dataset['objects']['bbox']
     label = tf.cast(dataset['objects']['label'], tf.float32)
@@ -27,6 +27,10 @@ def parse_aug_fn(dataset, input_size=(416, 416)):
     # 觸發影像旋轉機率50%
     x, bbox, label = tf.cond(tf.random.uniform([], 0, 1) > 0.5, lambda: rotate(x, bbox, label), lambda: (x, bbox, label))
 
+    # normalization
+    x = tf.clip_by_value(x, 0, 255)
+    x = x / 255.
+
     # 將[x1, y1, x2, y2, classes]合為shape=(x, 5)的Tensor
     y = tf.stack([bbox[1], bbox[0], bbox[3], bbox[2], label], axis=-1)
     y = tf.divide(y, [ih, iw, ih, iw, 1])
@@ -39,13 +43,17 @@ def parse_aug_fn(dataset, input_size=(416, 416)):
 def parse_fn(dataset, input_size=(416, 416)):
     ih, iw = input_size
     # (None, None, None, 3)
-    x = tf.cast(dataset['image'], tf.float32) / 255.
+    x = tf.cast(dataset['image'], tf.float32)
     # (None, [y1, x1, y2, x2])
     bbox = dataset['objects']['bbox']
     # (None, classes, 1)
     label = tf.cast(dataset['objects']['label'], tf.float32)
     # 將影像縮放到模型輸入大小
     x, bbox = resize(x, bbox, input_size)
+
+    # normalization
+    x = tf.clip_by_value(x, 0, 255)
+    x = x / 255.
 
     # 將[x1, y1, x2, y2, classes]合為shape=(x, 5)的Tensor
     y = tf.stack([bbox[1], bbox[0], bbox[3], bbox[2], label], axis=-1)
@@ -58,13 +66,17 @@ def parse_fn(dataset, input_size=(416, 416)):
 
 def parse_fn_test(dataset, input_size=(416, 416)):
     # (None, None, None, 3)
-    x = tf.cast(dataset['image'], tf.float32) / 255.
+    x = tf.cast(dataset['image'], tf.float32)
     # (None, [y1, x1, y2, x2])
     bbox = dataset['objects']['bbox']
     # (None, classes, 1)
     label = tf.cast(dataset['objects']['label'], tf.float32)
 
     x, bbox = resize(x, bbox, input_size)
+
+    # normalization
+    x = tf.clip_by_value(x, 0, 255)
+    x = x / 255.
 
     # 將[x1, y1, x2, y2, classes]合為shape=(x, 5)的Tensor
     y = tf.stack([bbox[1], bbox[0], bbox[3], bbox[2], label], axis=-1)
@@ -350,7 +362,7 @@ if __name__ == "__main__":
         # 取得訓練數據，並順便讀取data的資訊
         train_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
         train_data = train_data.shuffle(1000)  # 打散資料集
-        train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (608, 608)),
+        train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (416, 416)),
                                     num_parallel_calls=AUTOTUNE)
         classes_list = info.features['labels'].names
 
@@ -387,7 +399,7 @@ if __name__ == "__main__":
         # 取得訓練數據，並順便讀取data的資訊
         train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)
         train_data = train_data.shuffle(1000)  # 打散資料集
-        train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (608, 608)),
+        train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (416, 416)),
                                     num_parallel_calls=AUTOTUNE)
         train_data = train_data.batch(32)
         train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks, 19),
@@ -397,36 +409,36 @@ if __name__ == "__main__":
         for x_batch, y_batch in train_data.take(500):
             print(True)
 
-    # def test():
-    #     import os
-    #     import psutil
-    #     import gc
-    #     memory_used = []
-    #     for i in range(30):
-    #         # 取得訓練數據，並順便讀取data的資訊
-    #         train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)
-    #         train_data = train_data.shuffle(1000)  # 打散資料集
-    #         train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (608, 608)),
-    #                                     num_parallel_calls=AUTOTUNE)
-    #         train_data = train_data.batch(32)
-    #         # train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks, 19),
-    #         #                             num_parallel_calls=AUTOTUNE)
-    #         train_data = train_data.prefetch(buffer_size=AUTOTUNE)
-    #
-    #         for x_batch, y_batch in train_data.take(5):
-    #             print(i, True)
-    #         memory_used.append(psutil.virtual_memory().used / 2 ** 30)
-    #         gc.collect()
-    #
-    #     plt.plot(memory_used)
-    #     plt.title('Evolution of memory')
-    #     plt.xlabel('iteration')
-    #     plt.ylabel('memory used (GB)')
-    #     plt.show()
-    #
-    #
+    def test():
+        import os
+        import psutil
+        import gc
+        memory_used = []
+        for i in range(30):
+            # 取得訓練數據，並順便讀取data的資訊
+            train_data = tfds.load("voc2007", split=tfds.Split.TRAIN)
+            train_data = train_data.shuffle(1000)  # 打散資料集
+            train_data = train_data.map(lambda dataset: parse_aug_fn(dataset, (608, 608)),
+                                        num_parallel_calls=AUTOTUNE)
+            train_data = train_data.batch(32)
+            # train_data = train_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks, 19),
+            #                             num_parallel_calls=AUTOTUNE)
+            train_data = train_data.prefetch(buffer_size=AUTOTUNE)
+
+            for x_batch, y_batch in train_data.take(5):
+                print(i, True)
+            memory_used.append(psutil.virtual_memory().used / 2 ** 30)
+            gc.collect()
+
+        plt.plot(memory_used)
+        plt.title('Evolution of memory')
+        plt.xlabel('iteration')
+        plt.ylabel('memory used (GB)')
+        plt.show()
+
+    # test augmentation
     # test()
     # Augmentation test
-    # test_augmentation()
+    test_augmentation()
     # Targets transform test
-    test_label_transform()
+    # test_label_transform()
