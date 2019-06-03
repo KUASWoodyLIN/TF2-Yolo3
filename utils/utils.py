@@ -6,20 +6,35 @@ def load_darknet_weights(model, weights_file):
     wf = open(weights_file, 'rb')
     major, minor, revision, seen, _ = np.fromfile(wf, dtype=np.int32, count=5)
     layers_list = []
-    for layer in model.layers:
-        if layer.name == 'Yolo_DarkNet':
-            for sub_layer in layer.layers:
-                layers_list.append(sub_layer)
-        layers_list.append(layer)
+    conv_name = 'conv2d'
+    norm_name = 'batch_normalization_v2'
+    for i in range(52):
+        if i > 0:
+            layers_list.append(model.layers[1].get_layer(conv_name + '_{}'.format(i)))
+            layers_list.append(model.layers[1].get_layer(norm_name + '_{}'.format(i)))
+        else:
+            layers_list.append(model.layers[1].get_layer(conv_name))
+            layers_list.append(model.layers[1].get_layer(norm_name))
+    for i in range(52, 58):
+        layers_list.append(model.get_layer(conv_name + '_{}'.format(i)))
+        layers_list.append(model.get_layer(norm_name + '_{}'.format(i)))
+    layers_list.append(model.get_layer('conv2d_last_layer1_80'))
+    for i in range(58, 65):
+        layers_list.append(model.get_layer(conv_name + '_{}'.format(i)))
+        layers_list.append(model.get_layer(norm_name + '_{}'.format(i)))
+    layers_list.append(model.get_layer('conv2d_last_layer2_80'))
+    for i in range(65, 72):
+        layers_list.append(model.get_layer(conv_name + '_{}'.format(i)))
+        layers_list.append(model.get_layer(norm_name + '_{}'.format(i)))
+    layers_list.append(model.get_layer('conv2d_last_layer3_80'))
 
     for i, layer in enumerate(layers_list):
         if not layer.name.startswith('conv2d'):
             continue
         batch_norm = None
-        next_norm = 1 if i < 242 else 3
-        if i + next_norm < len(layers_list) and \
-                layers_list[i + next_norm].name.startswith('batch_normalization'):
-            batch_norm = layers_list[i + next_norm]
+        if i + 1 < len(layers_list) and \
+                layers_list[i + 1].name.startswith('batch_normalization'):
+            batch_norm = layers_list[i + 1]
 
         print("{}/{} {}".format(model.name, layer.name, 'bn' if batch_norm else 'bias'))
 
@@ -27,7 +42,7 @@ def load_darknet_weights(model, weights_file):
         size = layer.kernel_size[0]
         in_dim = layer.input.shape[-1]
 
-        if batch_norm is None :
+        if batch_norm is None:
             conv_bias = np.fromfile(wf, dtype=np.float32, count=filters)
         else:
             # darknet [beta, gamma, mean, variance]
@@ -43,7 +58,7 @@ def load_darknet_weights(model, weights_file):
         conv_weights = conv_weights.reshape(
             conv_shape).transpose([2, 3, 1, 0])
 
-        if batch_norm is None :
+        if batch_norm is None:
             layer.set_weights([conv_weights, conv_bias])
         elif batch_norm:
             layer.set_weights([conv_weights])
