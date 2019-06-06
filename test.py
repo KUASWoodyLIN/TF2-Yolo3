@@ -12,18 +12,28 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 # Load dataset
-# test_data, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
+test_data = tfds.load("voc2007", split=tfds.Split.TEST)
+# test_data = tfds.load("coco2014", split=tfds.Split.TEST, data_dir='/home/share/dataset/tensorflow-datasets')
+weight_file = 'model_data/yolo_weights.h5'      # or 'logs_yolo/models/best_xxx.h5'
+# weight_file = 'logs_yolo/models/best_099.h5'
 
-test_data, info = tfds.load("coco2014", split=tfds.Split.TEST, with_info=True,
-                            data_dir='/home/share/dataset/tensorflow-datasets')
-
-# Dataset info
-classes_list = info.features['objects']['label'].names
-num_classes = info.features['objects']['label'].num_classes
+if weight_file == 'model_data/yolo_weights.h5':
+    # COCO weights
+    classes_list = config.coco_classes
+    num_classes = len(config.coco_classes)
+    freeze = False
+else:
+    # VOC2007 weights
+    classes_list = config.voc_classes
+    num_classes = len(config.voc_classes)
+    if int(os.path.splitext(weight_file)[0].split('_')[-1]) <= 100:
+        freeze = True
+# 每個類別使用不同顏色做標記
+colors = (plt.cm.hsv(np.linspace(0, 1, 80)) * 255).astype(np.int).tolist()
 
 
 def test_and_show_result(model, test_number=10):
-    for data in test_data.take(test_number):
+    for img_count, data in enumerate(test_data.take(test_number)):
         org_img = data['image'].numpy()
         h, w, _ = data['image'].shape
         img, bboxes = parse_fn_test(data)
@@ -35,47 +45,36 @@ def test_and_show_result(model, test_number=10):
         for i in range(nums):
             x1y1 = tuple((np.array(boxes[i][0:2]) * (w, h)).astype(np.int32))
             x2y2 = tuple((np.array(boxes[i][2:4]) * (w, h)).astype(np.int32))
-            cv2.rectangle(org_img, x1y1, x2y2, (255, 0, 0), 2)
+            cv2.rectangle(org_img, x1y1, x2y2, colors[int(classes[i])], 2)
             cv2.putText(org_img,
                         '{} {:.4f}'.format(classes_list[int(classes[i])], scores[i]),
                         x1y1,
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (255, 0, 0), 2)
-
-        # # draw ground truth bounding box
-        # for box in bboxes:
-        #     x1 = tf.cast(box[0], tf.int16).numpy()
-        #     y1 = tf.cast(box[1], tf.int16).numpy()
-        #     x2 = tf.cast(box[2], tf.int16).numpy()
-        #     y2 = tf.cast(box[3], tf.int16).numpy()
-        #     label = classes_list[box[4]]
-        #     cv2.rectangle(org_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        #     cv2.putText(org_img,
-        #                 label,
-        #                 (x1, y1 - 3),
-        #                 cv2.FONT_HERSHEY_SIMPLEX,
-        #                 1, (0, 255, 0), 2)
+                        1, colors[int(classes[i])], 2)
         plt.figure()
         plt.imshow(org_img)
+        plt.imsave('output_images/output_{}.png'.format(img_count), org_img)
     plt.show()
 
 
 def main():
 
-    # Create model & Load weights
+    # Create model
     model = yolov3((config.size_h, config.size_w, 3), num_classes=num_classes, training=False)
     model.summary()
 
-    # Freeze layers
-    # darknet = model.get_layer('Yolo_DarkNet')
-    # trainable_model(darknet, trainable=False)
+    if freeze:
+        # Freeze all layers in except last layer
+        trainable_model(model, trainable=False)
+        model.get_layer('conv2d_last_layer1_20').trainable = True
+        model.get_layer('conv2d_last_layer2_20').trainable = True
+        model.get_layer('conv2d_last_layer3_20').trainable = True
+        model.trainable = True
 
     # Load weights
-    print('weights loaded ', config.yolo_voc_weights)
-    # model.load_weights(config.yolo_voc_weights, by_name=True)
-    # model.load_weights('logs_yolo/models/best_066.h5')
-    model.load_weights('model_data/yolo_weights.h5')
+    model.load_weights(weight_file)
 
+    # Detect Object
     test_and_show_result(model, test_number=10)
 
 

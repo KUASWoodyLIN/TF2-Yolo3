@@ -81,16 +81,12 @@ def main():
     model_ep = tf.keras.callbacks.EarlyStopping(patience=15, verbose=1)
     mdoel_rlr = tf.keras.callbacks.ReduceLROnPlateau(verbose=1)
 
-    # Freeze layers
-    darknet = model.get_layer('Yolo_DarkNet')
-    trainable_model(darknet, trainable=False)
-
     # Freeze all layers in except last layer
-    # trainable_model(model, trainable=False)
-    # model.get_layer('conv2d_last_layer1_20').trainable = True
-    # model.get_layer('conv2d_last_layer2_20').trainable = True
-    # model.get_layer('conv2d_last_layer3_20').trainable = True
-    # model.trainable = True
+    trainable_model(model, trainable=False)
+    model.get_layer('conv2d_last_layer1_20').trainable = True
+    model.get_layer('conv2d_last_layer2_20').trainable = True
+    model.get_layer('conv2d_last_layer3_20').trainable = True
+    model.trainable = True
 
     # 1) Training model step1
     print("Start teraining Step1")
