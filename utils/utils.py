@@ -7,7 +7,7 @@ def load_darknet_weights(model, weights_file):
     major, minor, revision, seen, _ = np.fromfile(wf, dtype=np.int32, count=5)
     layers_list = []
     conv_name = 'conv2d'
-    norm_name = 'batch_normalization_v2'
+    norm_name = 'batch_normalization'
     for i in range(52):
         if i > 0:
             layers_list.append(model.layers[1].get_layer(conv_name + '_{}'.format(i)))
@@ -69,7 +69,8 @@ def load_darknet_weights(model, weights_file):
 
 
 def trainable_model(model, trainable=False):
-    model.trainable = trainable
-    if isinstance(model, tf.keras.Model):
-        for l in model.layers:
+    for l in model.layers:
+        if isinstance(l, tf.keras.Model):
             trainable_model(l, trainable)
+        else:
+            l.trainable = trainable

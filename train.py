@@ -1,3 +1,4 @@
+import os
 import config
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -9,11 +10,7 @@ from utils import parse_aug_fn, parse_fn, transform_targets, trainable_model
 anchor_masks = config.yolo_anchor_masks
 
 
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
-
-def training_model(model, callbacks, classes=80, step=1):
+def training_model(model, callbacks, num_classes=80, step=1):
     if step == 1:
         batch_size = config.step1_batch_size
         learning_rate = config.step1_learning_rate
@@ -48,7 +45,7 @@ def training_model(model, callbacks, classes=80, step=1):
     # Training
     optimizer = tf.keras.optimizers.Adam(lr=learning_rate)
     model.compile(optimizer=optimizer,
-                  loss=[YoloLoss(anchors[mask], classes=classes) for mask in anchor_masks],
+                  loss=[YoloLoss(anchors[mask], num_classes=num_classes) for mask in anchor_masks],
                   run_eagerly=False)
     model.fit(train_data,
               epochs=end_epochs,
@@ -59,11 +56,10 @@ def training_model(model, callbacks, classes=80, step=1):
 
 def main():
     # Dataset Info
-    _, info = tfds.load("voc2007", split=tfds.Split.TRAIN, with_info=True)
-    classes = info.features['labels'].num_classes
+    num_classes = len(config.voc_classes)
 
     # Create model
-    model = yolov3((config.size_h, config.size_w, 3), num_classes=classes, training=True)
+    model = yolov3((config.size_h, config.size_w, 3), num_classes=num_classes, training=True)
     model.summary()
 
     # Load Weights
@@ -86,23 +82,22 @@ def main():
     model.get_layer('conv2d_last_layer1_20').trainable = True
     model.get_layer('conv2d_last_layer2_20').trainable = True
     model.get_layer('conv2d_last_layer3_20').trainable = True
-    model.trainable = True
 
     # 1) Training model step1
     print("Start teraining Step1")
     training_model(model,
                    callbacks=[model_tb, model_mckp, mdoel_rlr, model_ep],
-                   classes=classes,
+                   num_classes=num_classes,
                    step=1)
 
     # Unfreeze layers
-    trainable_model(darknet, trainable=True)
+    trainable_model(model, trainable=True)
 
     # 2) Training model step2
     print("Start teraining Step2")
     training_model(model,
                    callbacks=[model_tb, model_mckp, mdoel_rlr, model_ep],
-                   classes=classes,
+                   num_classes=num_classes,
                    step=2)
 
 
