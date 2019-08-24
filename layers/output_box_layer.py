@@ -16,11 +16,11 @@ class YoloOutputBoxLayer(tf.keras.layers.Layer):
         self.num_classes = num_classes
         self.training = training
         if output_layer == 1:
-            self.anchors_to_image_scale = 32
+            self.grid_to_image_scale = 32
         elif output_layer == 2:
-            self.anchors_to_image_scale = 16
+            self.grid_to_image_scale = 16
         else:
-            self.anchors_to_image_scale = 8
+            self.grid_to_image_scale = 8
 
     def build(self, input_shape):
         self.grid_h, self.grid_w = input_shape[1:3]
@@ -51,9 +51,11 @@ class YoloOutputBoxLayer(tf.keras.layers.Layer):
         grid = tf.expand_dims(grid, axis=2)     # (gx, gy, 1, 2)
 
         # box_xy: (batch, grid_h, grid_w, anchors, (x, y))
-        # each box (x, y)
         box_xy = (box_xy + tf.cast(grid, tf.float32)) / tf.cast((grid_w, grid_h), tf.float32)
-        box_wh = tf.exp(box_wh) * (grid_w, grid_h) * self.anchors_to_image_scale
+        # Calculate input image size
+        image_w, image_h = (grid_w * self.grid_to_image_scale, grid_h * self.grid_to_image_scale)
+        # box_wh: (batch, grid_h, grid_w, anchors, (w, h))
+        box_wh = tf.exp(box_wh) * (self.anchors / (image_w, image_h))
 
         box_x1y1 = box_xy - box_wh / 2
         box_x2y2 = box_xy + box_wh / 2
