@@ -19,21 +19,20 @@
     
     - [TensorFlow addons](https://github.com/tensorflow/addons)
 
-
+- DarkNet weights 轉換到 TensorFlow weights
+    ```bash
+    python convert.py
+    ```
 
 - YOLO-V3訓練
     ```bash
     python train.py
     ```
 
-
-
 - YOLO-V3多尺度訓練(multi scale training)
     ```bash
     python train-multi-scale.py
     ```
-
-
 
 - YOLO-V3測試
     ```bash
@@ -47,7 +46,11 @@
     tensorboard --logdir logs_yolo
     ```
 
+## Results
 
+Predict by YOLO v3 original weights
+
+![100 Iteratives](./output_images/output_results.png)
 
 ## References
 
