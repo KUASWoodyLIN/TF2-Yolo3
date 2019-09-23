@@ -50,8 +50,7 @@
 
 Predict by YOLO v3 original weights
 
-![100 Iteratives](./output_images/output_results.png)
-
+![100 Iteratives](https://raw.githubusercontent.com/KUASWoodyLIN/TF2-Yolo3/master/output_images/output_results.png)
 ## References
 
 - https://github.com/pjreddie/darknet
