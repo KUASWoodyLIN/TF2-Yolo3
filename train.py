@@ -26,8 +26,8 @@ def training_model(model, callbacks, num_classes=80, step=1):
 
     # Training dataset setting
     AUTOTUNE = tf.data.experimental.AUTOTUNE  # 自動調整模式
-    combined_split = tfds.Split.TRAIN + tfds.Split.VALIDATION
-    train_data = tfds.load("voc2007", split=combined_split)    # 取得訓練數據
+    combined_split = 'train+validation'
+    train_data = tfds.load("voc", split=combined_split)    # 取得訓練數據
     train_data = train_data.shuffle(1000)  # 打散資料集
     train_data = train_data.map(lambda dataset: parse_aug_fn(dataset), num_parallel_calls=AUTOTUNE)
     train_data = train_data.batch(batch_size)
@@ -36,7 +36,7 @@ def training_model(model, callbacks, num_classes=80, step=1):
     train_data = train_data.prefetch(buffer_size=AUTOTUNE)
 
     # Validation dataset setting
-    val_data = tfds.load("voc2007", split=tfds.Split.TEST)
+    val_data = tfds.load("voc", split='test')
     val_data = val_data.map(lambda dataset: parse_fn(dataset), num_parallel_calls=AUTOTUNE)
     val_data = val_data.batch(batch_size)
     val_data = val_data.map(lambda x, y: transform_targets(x, y, anchors, anchor_masks), num_parallel_calls=AUTOTUNE)

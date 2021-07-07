@@ -7,17 +7,17 @@
 ## Usage
 
 - Requirements
-    - [Numpy](http://www.numpy.org/)
+    - [Numpy == 1.19.5](http://www.numpy.org/)
     
-    - [OpenCV](https://opencv.org/)
+    - [OpenCV == 4.5.2.54](https://opencv.org/)
     
-    - [Matplotlib](https://matplotlib.org/)
+    - [Matplotlib == 3.1.1](https://matplotlib.org/)
     
-    - [TensorFlow >= 2.0](https://www.tensorflow.org/versions/r2.0/api_docs/python/tf)
+    - [TensorFlow == 2.5.0](https://www.tensorflow.org/versions/r2.0/api_docs/python/tf)
     
-    - [TensorFlow Datasets](https://www.tensorflow.org/datasets/)
+    - [TensorFlow Datasets == 4.3.0](https://www.tensorflow.org/datasets/)
     
-    - [TensorFlow addons](https://github.com/tensorflow/addons)
+    - [Tensorflow Addons == 0.13.0](https://github.com/tensorflow/addons)
 
 - DarkNet weights 轉換到 TensorFlow weights
     ```bash
